@@ -3,3 +3,6 @@
 Cargo.lock
 /example-project/target/
 /example-project/usage-from-c/run_tests
+
+# Ensure we don't screw up the vendor directory in the source package
+!/vendor/**
