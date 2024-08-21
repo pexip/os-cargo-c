@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_update_autotools_config:
+	# Do not do this
+
+override_dh_auto_build:
+	cargo build --release --package cargo-c --features vendored-openssl

@@ -1,0 +1,16 @@
+Source: cargo-c
+Section: devel
+Priority: optional
+Maintainer: Pexip AS <packaging@pexip.com>
+Standards-Version: 4.3.0
+Build-Depends: debhelper-compat (= 13), cargo
+Vcs-Browser: https://github.com/pexip/os-cargo-c/
+Vcs-Git: https://github.com/pexip/os-cargo-c.git
+
+Package: cargo-c
+Architecture: any
+Depends: ${misc:Depends},
+ ${shlib:Depends},
+Description: Cargo C compatibility tool
+ Cargo applet to build and install C-ABI compatible dynamic and static
+ libraries.

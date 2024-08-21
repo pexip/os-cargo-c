@@ -1,0 +1,4 @@
+target/release/cargo-capi /usr/bin
+target/release/cargo-cbuild /usr/bin
+target/release/cargo-cinstall /usr/bin
+target/release/cargo-ctest /usr/bin
