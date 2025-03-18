@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -eu -o pipefail
 
-# Nothing here may use symlinks so these fixtures can be used on windows as well.
+# These fixtures don't use symlinks. See `many-symlinks.sh` for some that do.
 
 git init with-nested-dot-git
 (cd with-nested-dot-git
@@ -280,7 +280,7 @@ git init expendable-and-precious-nested-in-ignored-dir
   echo 'ignored/' > .gitignore
   git add .gitignore && git commit -m "init"
   mkdir -p ignored/other
-  cp -Rv ../expendable-and-precious ignored/d
+  cp -R ../expendable-and-precious ignored/d
   rm -Rf ignored/d/*-by-filematch ignored/d/some-*
   mkdir -p other/ignored && >other/ignored/a
 )
@@ -324,7 +324,7 @@ git init type-mismatch-icase
 git init type-mismatch-icase-clash-dir-is-file
 (cd type-mismatch-icase-clash-dir-is-file
   empty_oid=$(git hash-object -w --stdin </dev/null)
-  git update-index --index-info <<-EOF
+  git update-index --index-info <<EOF
 100644 $empty_oid	D/a
 100644 $empty_oid	d
 EOF
@@ -350,4 +350,105 @@ git clone submodule multiple-submodules
   git submodule add ../submodule submodule
   git submodule add ../submodule a/b
   git commit -m "add modules"
+)
+
+git clone submodule one-ignored-submodule
+(cd one-ignored-submodule
+  git submodule add ../submodule submodule
+  echo '/submodule/' > .gitignore
+  echo '*' > submodule/.gitignore
+  git commit -m "add seemingly ignored submodule"
+)
+
+git init slash-in-root-and-negated
+(cd slash-in-root-and-negated
+  cat <<'EOF' >.gitignore
+/
+!file
+!*.md
+!.github
+!.github/**
+EOF
+  touch file readme.md
+  mkdir .github
+  touch .github/workflow.yml
+  git add .github readme.md .gitignore
+  git commit -m "init"
+)
+
+git init star-in-root-and-negated
+(cd star-in-root-and-negated
+  cat <<'EOF' >.gitignore
+*
+!file
+!.gitignore
+!*.md
+!.github
+!.github/**
+EOF
+  touch file readme.md
+  mkdir .github
+  touch .github/workflow.yml
+  git add .github readme.md .gitignore
+  git commit -m "init"
+)
+
+git init slash-in-subdir-and-negated
+(cd slash-in-subdir-and-negated
+  mkdir sub
+  (cd sub
+    cat <<'EOF' >.gitignore
+/
+!file
+!*.md
+!.github
+!.github/**
+EOF
+    touch file readme.md
+    mkdir .github
+    touch .github/workflow.yml
+    git add .github readme.md .gitignore
+    git commit -m "init"
+  )
+)
+
+git init star-in-subdir-and-negated
+(cd star-in-subdir-and-negated
+  mkdir sub
+  (cd sub
+    cat <<'EOF' >.gitignore
+*
+!file
+!.gitignore
+!*.md
+!.github
+!.github/**
+EOF
+    touch file readme.md
+    mkdir .github
+    touch .github/workflow.yml
+    git add .github readme.md .gitignore
+    git commit -m "init"
+  )
+)
+
+git init with-sub-repo
+(cd with-sub-repo
+  echo '*' > .gitignore
+  git add -f .gitignore
+  git clone ../dir-with-file sub-repo
+)
+
+git clone dir-with-tracked-file in-repo-worktree
+(cd in-repo-worktree
+  git worktree add worktree
+  git worktree add -b other-worktree dir/worktree
+)
+
+git clone dir-with-tracked-file in-repo-hidden-worktree
+(cd in-repo-hidden-worktree
+  echo '/hidden/' > .gitignore
+  mkdir -p hidden/subdir
+  touch hidden/file
+  git worktree add -b worktree-branch hidden/subdir/worktree
 )

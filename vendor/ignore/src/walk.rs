@@ -11,7 +11,7 @@ use std::{
 use {
     crossbeam_deque::{Stealer, Worker as Deque},
     same_file::Handle,
-    walkdir::{self, WalkDir},
+    walkdir::WalkDir,
 };
 
 use crate::{
@@ -591,7 +591,7 @@ impl WalkBuilder {
     ///
     /// Note that this *doesn't* return something that implements `Iterator`.
     /// Instead, the returned value must be run with a closure. e.g.,
-    /// `builder.build_parallel().run(|| |path| println!("{:?}", path))`.
+    /// `builder.build_parallel().run(|| |path| { println!("{path:?}"); WalkState::Continue })`.
     pub fn build_parallel(&self) -> WalkParallel {
         WalkParallel {
             paths: self.paths.clone().into_iter(),

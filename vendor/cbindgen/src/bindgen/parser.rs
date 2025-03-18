@@ -81,6 +81,13 @@ pub(crate) fn parse_lib(lib: Cargo, config: &Config) -> ParseResult {
     let binding_crate = context.lib.as_ref().unwrap().binding_crate_ref();
     context.parse_crate(&binding_crate)?;
     context.out.source_files = context.cache_src.keys().map(|k| k.to_owned()).collect();
+    context.out.package_version = context
+        .lib
+        .as_ref()
+        .unwrap()
+        .binding_crate_ref()
+        .version
+        .unwrap();
     Ok(context.out)
 }
 
@@ -99,7 +106,7 @@ struct Parser<'a> {
     out: Parse,
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     fn should_parse_dependency(&self, pkg_name: &str) -> bool {
         if self.parsed_crates.contains(pkg_name) {
             return false;
@@ -338,8 +345,11 @@ impl<'a> Parser<'a> {
                     // Last chance to find a module path
                     let mut path_attr_found = false;
                     for attr in &item.attrs {
-                        if let Ok(syn::Meta::NameValue(syn::MetaNameValue { path, lit, .. })) =
-                            attr.parse_meta()
+                        if let syn::Meta::NameValue(syn::MetaNameValue {
+                            path,
+                            value: syn::Expr::Lit(syn::ExprLit { lit, .. }),
+                            ..
+                        }) = &attr.meta
                         {
                             match lit {
                                 syn::Lit::Str(ref path_lit) if path.is_ident("path") => {
@@ -409,6 +419,7 @@ pub struct Parse {
     pub typedefs: ItemMap<Typedef>,
     pub functions: Vec<Function>,
     pub source_files: Vec<FilePathBuf>,
+    pub package_version: String,
 }
 
 impl Parse {
@@ -423,6 +434,7 @@ impl Parse {
             typedefs: ItemMap::default(),
             functions: Vec::new(),
             source_files: Vec::new(),
+            package_version: String::new(),
         }
     }
 
@@ -471,6 +483,7 @@ impl Parse {
         self.typedefs.extend_with(&other.typedefs);
         self.functions.extend_from_slice(&other.functions);
         self.source_files.extend_from_slice(&other.source_files);
+        self.package_version.clone_from(&other.package_version);
     }
 
     fn load_syn_crate_mod<'a>(
@@ -531,7 +544,9 @@ impl Parse {
                     if let syn::Type::Path(ref path) = *item_impl.self_ty {
                         if let Some(type_name) = path.path.get_ident() {
                             for method in item_impl.items.iter().filter_map(|item| match item {
-                                syn::ImplItem::Method(method) => Some(method),
+                                syn::ImplItem::Fn(method) if !method.should_skip_parsing() => {
+                                    Some(method)
+                                }
                                 _ => None,
                             }) {
                                 self.load_syn_method(
@@ -570,7 +585,11 @@ impl Parse {
         item_impl: &syn::ItemImpl,
     ) {
         let associated_constants = item_impl.items.iter().filter_map(|item| match item {
-            syn::ImplItem::Const(ref associated_constant) => Some(associated_constant),
+            syn::ImplItem::Const(ref associated_constant)
+                if !associated_constant.should_skip_parsing() =>
+            {
+                Some(associated_constant)
+            }
             _ => None,
         });
         self.load_syn_assoc_consts(
@@ -590,11 +609,12 @@ impl Parse {
         mod_cfg: Option<&Cfg>,
         item: &syn::ItemForeignMod,
     ) {
-        if !item.abi.is_c() {
+        if !item.abi.is_c() && !item.abi.is_omitted() {
             info!("Skip {} - (extern block must be extern C).", crate_name);
             return;
         }
 
+        let mod_cfg = Cfg::append(mod_cfg, Cfg::load(&item.attrs));
         for foreign_item in &item.items {
             if let syn::ForeignItem::Fn(ref function) = *foreign_item {
                 if !config
@@ -608,7 +628,14 @@ impl Parse {
                     return;
                 }
                 let path = Path::new(function.sig.ident.unraw().to_string());
-                match Function::load(path, None, &function.sig, true, &function.attrs, mod_cfg) {
+                match Function::load(
+                    path,
+                    None,
+                    &function.sig,
+                    true,
+                    &function.attrs,
+                    mod_cfg.as_ref(),
+                ) {
                     Ok(func) => {
                         info!("Take {}::{}.", crate_name, &function.sig.ident);
 
@@ -633,7 +660,7 @@ impl Parse {
         crate_name: &str,
         mod_cfg: Option<&Cfg>,
         self_type: &Path,
-        item: &syn::ImplItemMethod,
+        item: &syn::ImplItemFn,
     ) {
         self.load_fn_declaration(
             config,
@@ -724,7 +751,7 @@ impl Parse {
                 );
             }
             (false, Some(_exported_name)) => {
-                warn!("Skipping {} - (not `extern \"C\"`", loggable_item_name());
+                warn!("Skipping {} - (not `extern \"C\"`)", loggable_item_name());
             }
             (false, None) => {}
         }

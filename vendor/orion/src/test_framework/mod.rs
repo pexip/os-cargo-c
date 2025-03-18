@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2019-2023 The orion Developers
+// Copyright (c) 2019-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,15 @@
 /// Tests for a streaming context that offers incremental processing.
 pub mod incremental_interface;
 
+/// Tests for an eXtendable Output Function.
+pub mod xof_interface;
+
 /// Tests for AEAD interfaces such as `chacha20poly1305`.
 pub mod aead_interface;
 
 /// Tests for stream ciphers such as `chacha20`.
 pub mod streamcipher_interface;
+
+#[cfg(feature = "safe_api")]
+/// Tests for KEMs such as `mlkem`.
+pub mod kem_interface;

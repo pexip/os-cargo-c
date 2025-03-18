@@ -47,7 +47,6 @@ pub struct Cache<S> {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod cache;
 
 ///
@@ -67,23 +66,18 @@ pub fn sink(object_hash: gix_hash::Kind) -> Sink {
     }
 }
 
+///
+pub mod memory;
+
 mod sink;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod find;
 
 /// An object database equivalent to `/dev/null`, dropping all objects stored into it.
 mod traits;
 
-pub use traits::{Header, HeaderExt, Write};
-
-///
-#[allow(clippy::empty_docs)]
-pub mod write {
-    /// The error type returned by the [`Write`](crate::Write) trait.
-    pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-}
+pub use traits::{Header, HeaderExt};
 
 /// A thread-local handle to access any object.
 pub type Handle = Cache<store::Handle<OwnShared<Store>>>;

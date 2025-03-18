@@ -1,11 +1,11 @@
 use super::features::{CliFeatures, RequestedFeatures};
-use crate::core::{Dependency, PackageId, Summary};
+use crate::core::{Dependency, PackageId, SourceId, Summary};
 use crate::util::errors::CargoResult;
 use crate::util::interning::InternedString;
 use crate::util::GlobalContext;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Range;
+use std::num::NonZeroU64;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -151,7 +151,7 @@ pub struct ResolveOpts {
 }
 
 impl ResolveOpts {
-    /// Creates a ResolveOpts that resolves everything.
+    /// Creates a `ResolveOpts` that resolves everything.
     pub fn everything() -> ResolveOpts {
         ResolveOpts {
             dev_deps: true,
@@ -161,6 +161,58 @@ impl ResolveOpts {
 
     pub fn new(dev_deps: bool, features: RequestedFeatures) -> ResolveOpts {
         ResolveOpts { dev_deps, features }
+    }
+}
+
+/// A key that when stord in a hash map ensures that there is only one
+/// semver compatible version of each crate.
+/// Find the activated version of a crate based on the name, source, and semver compatibility.
+#[derive(Clone, PartialEq, Eq, Debug, Ord, PartialOrd)]
+pub struct ActivationsKey(InternedString, SemverCompatibility, SourceId);
+
+impl ActivationsKey {
+    pub fn new(
+        name: InternedString,
+        ver: SemverCompatibility,
+        source_id: SourceId,
+    ) -> ActivationsKey {
+        ActivationsKey(name, ver, source_id)
+    }
+}
+
+impl std::hash::Hash for ActivationsKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+        self.1.hash(state);
+        // self.2.hash(state); // Packages that only differ by SourceId are rare enough to not be worth hashing
+    }
+}
+
+/// A type that represents when cargo treats two Versions as compatible.
+/// Versions `a` and `b` are compatible if their left-most nonzero digit is the
+/// same.
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, PartialOrd, Ord)]
+pub enum SemverCompatibility {
+    Major(NonZeroU64),
+    Minor(NonZeroU64),
+    Patch(u64),
+}
+
+impl From<&semver::Version> for SemverCompatibility {
+    fn from(ver: &semver::Version) -> Self {
+        if let Some(m) = NonZeroU64::new(ver.major) {
+            return SemverCompatibility::Major(m);
+        }
+        if let Some(m) = NonZeroU64::new(ver.minor) {
+            return SemverCompatibility::Minor(m);
+        }
+        SemverCompatibility::Patch(ver.patch)
+    }
+}
+
+impl PackageId {
+    pub fn as_activations_key(self) -> ActivationsKey {
+        ActivationsKey(self.name(), self.version().into(), self.source_id())
     }
 }
 
@@ -181,13 +233,13 @@ impl DepsFrame {
     fn min_candidates(&self) -> usize {
         self.remaining_siblings
             .peek()
-            .map(|(_, (_, candidates, _))| candidates.len())
+            .map(|(_, candidates, _)| candidates.len())
             .unwrap_or(0)
     }
 
-    pub fn flatten(&self) -> impl Iterator<Item = (PackageId, Dependency)> + '_ {
+    pub fn flatten(&self) -> impl Iterator<Item = (PackageId, &Dependency)> + '_ {
         self.remaining_siblings
-            .clone()
+            .remaining()
             .map(move |(d, _, _)| (self.parent.package_id(), d))
     }
 }
@@ -228,7 +280,7 @@ pub struct RemainingDeps {
     time: u32,
     /// the data is augmented by the insertion time.
     /// This insures that no two items will cmp eq.
-    /// Forcing the OrdSet into a multi set.
+    /// Forcing the `OrdSet` into a multi set.
     data: im_rc::OrdSet<(DepsFrame, u32)>,
 }
 
@@ -251,7 +303,8 @@ impl RemainingDeps {
             // Figure out what our next dependency to activate is, and if nothing is
             // listed then we're entirely done with this frame (yay!) and we can
             // move on to the next frame.
-            if let Some(sibling) = deps_frame.remaining_siblings.next() {
+            let sibling = deps_frame.remaining_siblings.iter().next().cloned();
+            if let Some(sibling) = sibling {
                 let parent = Summary::clone(&deps_frame.parent);
                 self.data.insert((deps_frame, insertion_time));
                 return Some((just_here_for_the_error_messages, (parent, sibling)));
@@ -259,7 +312,7 @@ impl RemainingDeps {
         }
         None
     }
-    pub fn iter(&mut self) -> impl Iterator<Item = (PackageId, Dependency)> + '_ {
+    pub fn iter(&mut self) -> impl Iterator<Item = (PackageId, &Dependency)> + '_ {
         self.data.iter().flat_map(|(other, _)| other.flatten())
     }
 }
@@ -300,12 +353,6 @@ pub enum ConflictReason {
     /// A dependency listed a feature for an optional dependency, but that
     /// optional dependency is "hidden" using namespaced `dep:` syntax.
     NonImplicitDependencyAsFeature(InternedString),
-
-    // TODO: needs more info for `activation_error`
-    // TODO: needs more info for `find_candidate`
-    /// pub dep error
-    PublicDependency(PackageId),
-    PubliclyExports(PackageId),
 }
 
 impl ConflictReason {
@@ -320,13 +367,6 @@ impl ConflictReason {
     pub fn is_required_dependency_as_features(&self) -> bool {
         matches!(self, ConflictReason::RequiredDependencyAsFeature(_))
     }
-
-    pub fn is_public_dependency(&self) -> bool {
-        matches!(
-            self,
-            ConflictReason::PublicDependency(_) | ConflictReason::PubliclyExports(_)
-        )
-    }
 }
 
 /// A list of packages that have gotten in the way of resolving a dependency.
@@ -337,22 +377,27 @@ pub type ConflictMap = BTreeMap<PackageId, ConflictReason>;
 
 pub struct RcVecIter<T> {
     vec: Rc<Vec<T>>,
-    rest: Range<usize>,
+    offset: usize,
 }
 
 impl<T> RcVecIter<T> {
     pub fn new(vec: Rc<Vec<T>>) -> RcVecIter<T> {
-        RcVecIter {
-            rest: 0..vec.len(),
-            vec,
-        }
+        RcVecIter { vec, offset: 0 }
     }
 
-    fn peek(&self) -> Option<(usize, &T)> {
-        self.rest
-            .clone()
-            .next()
-            .and_then(|i| self.vec.get(i).map(|val| (i, &*val)))
+    pub fn peek(&self) -> Option<&T> {
+        self.vec.get(self.offset)
+    }
+
+    pub fn remaining(&self) -> impl Iterator<Item = &T> + '_ {
+        self.vec.get(self.offset..).into_iter().flatten()
+    }
+
+    pub fn iter(&mut self) -> impl Iterator<Item = &T> + '_ {
+        let iter = self.vec.get(self.offset..).into_iter().flatten();
+        // This call to `ìnspect()` is used to increment `self.offset` when iterating the inner `Vec`,
+        // while keeping the `ExactSizeIterator` property.
+        iter.inspect(|_| self.offset += 1)
     }
 }
 
@@ -361,25 +406,7 @@ impl<T> Clone for RcVecIter<T> {
     fn clone(&self) -> RcVecIter<T> {
         RcVecIter {
             vec: self.vec.clone(),
-            rest: self.rest.clone(),
+            offset: self.offset,
         }
     }
 }
-
-impl<T> Iterator for RcVecIter<T>
-where
-    T: Clone,
-{
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.rest.next().and_then(|i| self.vec.get(i).cloned())
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        // rest is a std::ops::Range, which is an ExactSizeIterator.
-        self.rest.size_hint()
-    }
-}
-
-impl<T: Clone> ExactSizeIterator for RcVecIter<T> {}

@@ -576,6 +576,12 @@ impl<'a> EntryFields<'a> {
                             ),
                         )
                     })?;
+                // While permissions on symlinks are meaningless on most systems, the ownership
+                // of symlinks is important as it dictates the access control to the symlink
+                // itself.
+                if self.preserve_ownerships {
+                    set_ownerships(dst, &None, self.header.uid()?, self.header.gid()?)?;
+                }
                 if self.preserve_mtime {
                     if let Some(mtime) = get_mtime(&self.header) {
                         filetime::set_symlink_file_times(dst, mtime, mtime).map_err(|e| {
@@ -597,7 +603,7 @@ impl<'a> EntryFields<'a> {
                 ::std::os::windows::fs::symlink_file(src, dst)
             }
 
-            #[cfg(unix)]
+            #[cfg(all(unix, not(target_arch = "wasm32")))]
             fn symlink(src: &Path, dst: &Path) -> io::Result<()> {
                 ::std::os::unix::fs::symlink(src, dst)
             }
@@ -723,7 +729,7 @@ impl<'a> EntryFields<'a> {
             })
         }
 
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_arch = "wasm32")))]
         fn _set_ownerships(
             dst: &Path,
             f: &Option<&mut std::fs::File>,
@@ -794,7 +800,7 @@ impl<'a> EntryFields<'a> {
             })
         }
 
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_arch = "wasm32")))]
         fn _set_perms(
             dst: &Path,
             f: Option<&mut std::fs::File>,
@@ -850,7 +856,7 @@ impl<'a> EntryFields<'a> {
             Err(io::Error::new(io::ErrorKind::Other, "Not implemented"))
         }
 
-        #[cfg(all(unix, feature = "xattr"))]
+        #[cfg(all(unix, not(target_arch = "wasm32"), feature = "xattr"))]
         fn set_xattrs(me: &mut EntryFields, dst: &Path) -> io::Result<()> {
             use std::ffi::OsStr;
             use std::os::unix::prelude::*;
@@ -863,7 +869,7 @@ impl<'a> EntryFields<'a> {
                 .filter_map(|e| e.ok())
                 .filter_map(|e| {
                     let key = e.key_bytes();
-                    let prefix = b"SCHILY.xattr.";
+                    let prefix = crate::pax::PAX_SCHILYXATTR.as_bytes();
                     key.strip_prefix(prefix).map(|rest| (rest, e))
                 })
                 .map(|(key, e)| (OsStr::from_bytes(key), e.value_bytes()));

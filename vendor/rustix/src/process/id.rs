@@ -10,45 +10,9 @@
 use crate::{backend, io};
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
-#[cfg(linux_kernel)]
-use backend::process::types::RawCpuid;
 
-/// The raw integer value of a Unix user ID.
-pub use crate::ugid::RawUid;
-
-/// The raw integer value of a Unix group ID.
-pub use crate::ugid::RawGid;
-
-/// The raw integer value of a Unix process ID.
-pub use crate::pid::RawPid;
-
-pub use crate::pid::Pid;
-pub use crate::ugid::{Gid, Uid};
-
-/// A Linux CPU ID.
-#[cfg(linux_kernel)]
-#[repr(transparent)]
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
-pub struct Cpuid(RawCpuid);
-
-#[cfg(linux_kernel)]
-impl Cpuid {
-    /// Converts a `RawCpuid` into a `Cpuid`.
-    ///
-    /// # Safety
-    ///
-    /// `raw` must be the value of a valid Linux CPU ID.
-    #[inline]
-    pub const unsafe fn from_raw(raw: RawCpuid) -> Self {
-        Self(raw)
-    }
-
-    /// Converts a `Cpuid` into a `RawCpuid`.
-    #[inline]
-    pub const fn as_raw(self) -> RawCpuid {
-        self.0
-    }
-}
+pub use crate::pid::{Pid, RawPid};
+pub use crate::ugid::{Gid, RawGid, RawUid, Uid};
 
 /// `getuid()`—Returns the process' real user ID.
 ///
@@ -56,7 +20,7 @@ impl Cpuid {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getuid.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/getuid.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/getuid.2.html
 #[inline]
 #[must_use]
@@ -70,7 +34,7 @@ pub fn getuid() -> Uid {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/geteuid.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/geteuid.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/geteuid.2.html
 #[inline]
 #[must_use]
@@ -84,7 +48,7 @@ pub fn geteuid() -> Uid {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getgid.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/getgid.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/getgid.2.html
 #[inline]
 #[must_use]
@@ -98,7 +62,7 @@ pub fn getgid() -> Gid {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getegid.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/getegid.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/getegid.2.html
 #[inline]
 #[must_use]
@@ -112,7 +76,7 @@ pub fn getegid() -> Gid {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpid.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/getpid.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/getpid.2.html
 #[inline]
 #[must_use]
@@ -122,11 +86,15 @@ pub fn getpid() -> Pid {
 
 /// `getppid()`—Returns the parent process' ID.
 ///
+/// This will return `None` if the current process has no parent (or no parent
+/// accessible in the current PID namespace), such as if the current process is
+/// an init process (PID 1).
+///
 /// # References
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getppid.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/getppid.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/getppid.2.html
 #[inline]
 #[must_use]
@@ -140,7 +108,7 @@ pub fn getppid() -> Option<Pid> {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpgid.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/getpgid.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/getpgid.2.html
 #[inline]
 pub fn getpgid(pid: Option<Pid>) -> io::Result<Pid> {
@@ -153,7 +121,7 @@ pub fn getpgid(pid: Option<Pid>) -> io::Result<Pid> {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/setpgid.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/setpgid.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/setpgid.2.html
 #[inline]
 pub fn setpgid(pid: Option<Pid>, pgid: Option<Pid>) -> io::Result<()> {
@@ -166,7 +134,7 @@ pub fn setpgid(pid: Option<Pid>, pgid: Option<Pid>) -> io::Result<()> {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpgrp.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/getpgrp.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/getpgrp.2.html
 #[inline]
 #[must_use]
@@ -180,7 +148,7 @@ pub fn getpgrp() -> Pid {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getsid.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/getsid.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/getsid.2.html
 #[cfg(not(target_os = "redox"))]
 #[inline]
@@ -194,7 +162,7 @@ pub fn getsid(pid: Option<Pid>) -> io::Result<Pid> {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/setsid.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/setsid.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/setsid.2.html
 #[inline]
 pub fn setsid() -> io::Result<Pid> {
@@ -207,9 +175,10 @@ pub fn setsid() -> io::Result<Pid> {
 ///  - [POSIX]
 ///  - [Linux]
 ///
-/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getgroups.html
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9799919799/functions/getgroups.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/getgroups.2.html
 #[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub fn getgroups() -> io::Result<Vec<Gid>> {
     // This code would benefit from having a better way to read into
     // uninitialized memory, but that requires `unsafe`.

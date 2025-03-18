@@ -131,40 +131,39 @@ void downstream_wtimeoutcb(struct ev_loop *loop, ev_timer *w, int revents) {
 // upstream could be nullptr for unittests
 Downstream::Downstream(Upstream *upstream, MemchunkPool *mcpool,
                        int64_t stream_id)
-    : dlnext(nullptr),
-      dlprev(nullptr),
-      response_sent_body_length(0),
-      balloc_(1024, 1024),
-      req_(balloc_),
-      resp_(balloc_),
-      request_start_time_(std::chrono::high_resolution_clock::now()),
-      blocked_request_buf_(mcpool),
-      request_buf_(mcpool),
-      response_buf_(mcpool),
-      upstream_(upstream),
-      blocked_link_(nullptr),
-      addr_(nullptr),
-      num_retry_(0),
-      stream_id_(stream_id),
-      assoc_stream_id_(-1),
-      downstream_stream_id_(-1),
-      response_rst_stream_error_code_(NGHTTP2_NO_ERROR),
-      affinity_cookie_(0),
-      request_state_(DownstreamState::INITIAL),
-      response_state_(DownstreamState::INITIAL),
-      dispatch_state_(DispatchState::NONE),
-      upgraded_(false),
-      chunked_request_(false),
-      chunked_response_(false),
-      expect_final_response_(false),
-      request_pending_(false),
-      request_header_sent_(false),
-      accesslog_written_(false),
-      new_affinity_cookie_(false),
-      blocked_request_data_eof_(false),
-      expect_100_continue_(false),
-      stop_reading_(false) {
-
+  : dlnext(nullptr),
+    dlprev(nullptr),
+    response_sent_body_length(0),
+    balloc_(1024, 1024),
+    req_(balloc_),
+    resp_(balloc_),
+    request_start_time_(std::chrono::high_resolution_clock::now()),
+    blocked_request_buf_(mcpool),
+    request_buf_(mcpool),
+    response_buf_(mcpool),
+    upstream_(upstream),
+    blocked_link_(nullptr),
+    addr_(nullptr),
+    num_retry_(0),
+    stream_id_(stream_id),
+    assoc_stream_id_(-1),
+    downstream_stream_id_(-1),
+    response_rst_stream_error_code_(NGHTTP2_NO_ERROR),
+    affinity_cookie_(0),
+    request_state_(DownstreamState::INITIAL),
+    response_state_(DownstreamState::INITIAL),
+    dispatch_state_(DispatchState::NONE),
+    upgraded_(false),
+    chunked_request_(false),
+    chunked_response_(false),
+    expect_final_response_(false),
+    request_pending_(false),
+    request_header_sent_(false),
+    accesslog_written_(false),
+    new_affinity_cookie_(false),
+    blocked_request_data_eof_(false),
+    expect_100_continue_(false),
+    stop_reading_(false) {
   auto config = get_config();
   auto &httpconf = config->http;
 
@@ -247,7 +246,7 @@ Downstream::~Downstream() {
 }
 
 int Downstream::attach_downstream_connection(
-    std::unique_ptr<DownstreamConnection> dconn) {
+  std::unique_ptr<DownstreamConnection> dconn) {
   if (dconn->attach_downstream(this) != 0) {
     return -1;
   }
@@ -275,7 +274,7 @@ void Downstream::detach_downstream_connection() {
   auto handler = dconn_->get_client_handler();
 
   handler->pool_downstream_connection(
-      std::unique_ptr<DownstreamConnection>(dconn_.release()));
+    std::unique_ptr<DownstreamConnection>(dconn_.release()));
 }
 
 DownstreamConnection *Downstream::get_downstream_connection() {
@@ -344,7 +343,7 @@ StringRef Downstream::assemble_request_cookie() {
   }
 
   auto iov = make_byte_ref(balloc_, len + 1);
-  auto p = iov.base;
+  auto p = std::begin(iov);
 
   for (auto &kv : req_.fs.headers()) {
     if (kv.token != http2::HD_COOKIE || kv.value.empty()) {
@@ -367,11 +366,11 @@ StringRef Downstream::assemble_request_cookie() {
   }
 
   // cut trailing "; "
-  if (p - iov.base >= 2) {
+  if (p - std::begin(iov) >= 2) {
     p -= 2;
   }
 
-  return StringRef{iov.base, p};
+  return StringRef{std::span{std::begin(iov), p}};
 }
 
 uint32_t Downstream::find_affinity_cookie(const StringRef &name) {
@@ -391,7 +390,7 @@ uint32_t Downstream::find_affinity_cookie(const StringRef &name) {
         return 0;
       }
 
-      if (!util::streq(name, StringRef{it, end})) {
+      if (name != StringRef{it, end}) {
         it = std::find(it, std::end(kv.value), ';');
         continue;
       }
@@ -474,12 +473,11 @@ void add_header(size_t &sum, HeaderRefs &headers, const StringRef &name,
 namespace {
 StringRef alloc_header_name(BlockAllocator &balloc, const StringRef &name) {
   auto iov = make_byte_ref(balloc, name.size() + 1);
-  auto p = iov.base;
-  p = std::copy(std::begin(name), std::end(name), p);
-  util::inp_strlower(iov.base, p);
+  auto p = std::copy(std::begin(name), std::end(name), std::begin(iov));
+  util::inp_strlower(std::begin(iov), p);
   *p = '\0';
 
-  return StringRef{iov.base, p};
+  return StringRef{std::span{std::begin(iov), p}};
 }
 } // namespace
 
@@ -490,7 +488,7 @@ void append_last_header_key(BlockAllocator &balloc, bool &key_prev, size_t &sum,
   sum += len;
   auto &item = headers.back();
   auto name =
-      realloc_concat_string_ref(balloc, item.name, StringRef{data, len});
+    realloc_concat_string_ref(balloc, item.name, StringRef{data, len});
 
   auto p = const_cast<uint8_t *>(name.byte());
   util::inp_strlower(p + name.size() - len, p + name.size());
@@ -508,7 +506,7 @@ void append_last_header_value(BlockAllocator &balloc, bool &key_prev,
   sum += len;
   auto &item = headers.back();
   item.value =
-      realloc_concat_string_ref(balloc, item.value, StringRef{data, len});
+    realloc_concat_string_ref(balloc, item.value, StringRef{data, len});
 }
 } // namespace
 
@@ -521,13 +519,13 @@ int FieldStore::parse_content_length() {
     }
 
     auto len = util::parse_uint(kv.value);
-    if (len == -1) {
+    if (!len) {
       return -1;
     }
     if (content_length != -1) {
       return -1;
     }
-    content_length = len;
+    content_length = *len;
   }
   return 0;
 }
@@ -621,7 +619,7 @@ void FieldStore::erase_content_length_and_transfer_encoding() {
 }
 
 void Downstream::set_request_start_time(
-    std::chrono::high_resolution_clock::time_point time) {
+  std::chrono::high_resolution_clock::time_point time) {
   request_start_time_ = std::move(time);
 }
 
@@ -721,7 +719,7 @@ int Downstream::end_upload_data() {
 }
 
 void Downstream::rewrite_location_response_header(
-    const StringRef &upstream_scheme) {
+  const StringRef &upstream_scheme) {
   auto hd = resp_.fs.header(http2::HD_LOCATION);
   if (!hd) {
     return;
@@ -732,14 +730,14 @@ void Downstream::rewrite_location_response_header(
   }
 
   http_parser_url u{};
-  auto rv = http_parser_parse_url(hd->value.c_str(), hd->value.size(), 0, &u);
+  auto rv = http_parser_parse_url(hd->value.data(), hd->value.size(), 0, &u);
   if (rv != 0) {
     return;
   }
 
-  auto new_uri = http2::rewrite_location_uri(balloc_, hd->value, u,
-                                             request_downstream_host_,
-                                             req_.authority, upstream_scheme);
+  auto new_uri =
+    http2::rewrite_location_uri(balloc_, hd->value, u, request_downstream_host_,
+                                req_.authority, upstream_scheme);
 
   if (new_uri.empty()) {
     return;
@@ -839,9 +837,9 @@ void Downstream::check_upgrade_fulfilled_http1() {
 
       std::array<uint8_t, base64::encode_length(20)> accept_buf;
       auto expected =
-          http2::make_websocket_accept_token(accept_buf.data(), ws_key_);
+        http2::make_websocket_accept_token(accept_buf.data(), ws_key_);
 
-      upgraded_ = expected != "" && expected == accept->value;
+      upgraded_ = !expected.empty() && expected == accept->value;
     } else {
       upgraded_ = resp_.http_status / 100 == 2;
     }
@@ -871,15 +869,14 @@ void Downstream::inspect_http1_request() {
     if (upgrade) {
       const auto &val = upgrade->value;
       // TODO Perform more strict checking for upgrade headers
-      if (util::streq_l(NGHTTP2_CLEARTEXT_PROTO_VERSION_ID, val.c_str(),
-                        val.size())) {
+      if (NGHTTP2_CLEARTEXT_PROTO_VERSION_ID ""_sr == val) {
         req_.http2_upgrade_seen = true;
       } else {
         req_.upgrade_request = true;
 
         // TODO Should we check Sec-WebSocket-Key, and
         // Sec-WebSocket-Version as well?
-        if (util::strieq_l("websocket", val)) {
+        if (util::strieq("websocket"_sr, val)) {
           req_.connect_proto = ConnectProto::WEBSOCKET;
         }
       }
@@ -892,8 +889,7 @@ void Downstream::inspect_http1_request() {
 
   auto expect = req_.fs.header(http2::HD_EXPECT);
   expect_100_continue_ =
-      expect &&
-      util::strieq(expect->value, StringRef::from_lit("100-continue"));
+    expect && util::strieq(expect->value, "100-continue"_sr);
 }
 
 void Downstream::inspect_http1_response() {
@@ -1178,7 +1174,7 @@ void Downstream::add_rcbuf(nghttp3_rcbuf *rcbuf) {
 #endif // ENABLE_HTTP3
 
 void Downstream::set_downstream_addr_group(
-    const std::shared_ptr<DownstreamAddrGroup> &group) {
+  const std::shared_ptr<DownstreamAddrGroup> &group) {
   group_ = group;
 }
 

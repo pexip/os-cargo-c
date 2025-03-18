@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2023 The orion Developers
+// Copyright (c) 2023-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,5 +21,16 @@
 // SOFTWARE.
 
 #[cfg(feature = "safe_api")]
+#[cfg_attr(docsrs, doc(cfg(feature = "safe_api")))]
 /// DHKEM(X25519, HKDF-SHA256) as specified in HPKE [RFC 9180](https://www.rfc-editor.org/rfc/rfc9180.html).
 pub mod x25519_hkdf_sha256;
+
+/// ML-KEM as specified in [FIPS-203](https://doi.org/10.6028/NIST.FIPS.203).
+mod ml_kem;
+
+pub use ml_kem::mlkem1024;
+pub use ml_kem::mlkem512;
+pub use ml_kem::mlkem768;
+
+/// X-Wing hybrid KEM as specified in [draft-connolly-cfrg-xwing-kem-06](https://www.ietf.org/archive/id/draft-connolly-cfrg-xwing-kem-06.html).
+pub mod xwing;

@@ -76,6 +76,10 @@ rustdocflags = ["…", "…"]     # custom flags to pass to rustdoc
 incremental = true            # whether or not to enable incremental compilation
 dep-info-basedir = "…"        # path for the base directory for targets in depfiles
 
+[credential-alias]
+# Provides a way to define aliases for credential providers.
+my-alias = ["/usr/bin/cargo-credential-example", "--argument", "value", "--flag"]
+
 [doc]
 browser = "chromium"          # browser to use with `cargo doc --open`,
                               # overrides the `BROWSER` environment variable
@@ -139,13 +143,22 @@ rpath = false            # Sets the rpath linking option.
 [profile.<name>.package.<name>]  # Override profile for a package.
 # Same keys for a normal profile (minus `panic`, `lto`, and `rpath`).
 
+[resolver]
+incompatible-rust-versions = "allow"  # Specifies how resolver reacts to these
+
 [registries.<name>]  # registries other than crates.io
 index = "…"          # URL of the registry index
 token = "…"          # authentication token for the registry
+credential-provider = "cargo:token" # The credential provider for this registry.
+
+[registries.crates-io]
+protocol = "sparse"  # The protocol to use to access crates.io.
 
 [registry]
 default = "…"        # name of the default registry
 token = "…"          # authentication token for crates.io
+credential-provider = "cargo:token"           # The credential provider for crates.io.
+global-credential-providers = ["cargo:token"] # The credential providers to use by default.
 
 [source.<name>]      # source definition and replacement
 replace-with = "…"   # replace this source with the given named source
@@ -170,7 +183,7 @@ rustflags = ["…", "…"]  # custom flags for `rustc`
 [target.<triple>.<links>] # `links` build script override
 rustc-link-lib = ["foo"]
 rustc-link-search = ["/path/to/foo"]
-rustc-flags = ["-L", "/some/path"]
+rustc-flags = "-L /some/path"
 rustc-cfg = ['key="value"']
 rustc-env = {key = "value"}
 rustc-cdylib-link-arg = ["…"]
@@ -210,10 +223,14 @@ In addition to the system above, Cargo recognizes a few other specific
 
 Cargo also accepts arbitrary configuration overrides through the
 `--config` command-line option. The argument should be in TOML syntax of
-`KEY=VALUE`:
+`KEY=VALUE` or provided as a path to an extra configuration file:
 
 ```console
+# With `KEY=VALUE` in TOML syntax
 cargo --config net.git-fetch-with-cli=true fetch
+
+# With a path to a configuration file
+cargo --config ./path/to/my/extra-config.toml fetch
 ```
 
 The `--config` option may be specified multiple times, in which case the
@@ -221,6 +238,10 @@ values are merged in left-to-right order, using the same merging logic
 that is used when multiple configuration files apply. Configuration
 values specified this way take precedence over environment variables,
 which take precedence over configuration files.
+
+When the `--config` option is provided as an extra configuration file,
+The configuration file loaded this way follow the same precedence rules
+as other options specified directly with `--config`.
 
 Some examples of what it looks like using Bourne shell syntax:
 
@@ -240,11 +261,6 @@ cargo --config "target.'cfg(all(target_arch = \"arm\", target_os = \"none\"))'.r
 # Example of overriding a profile setting.
 cargo --config profile.dev.package.image.opt-level=3 …
 ```
-
-The `--config` option can also be used to pass paths to extra
-configuration files that Cargo should use for a specific invocation.
-Options from configuration files loaded this way follow the same
-precedence rules as other options specified directly with `--config`.
 
 ## Config-relative paths
 
@@ -396,7 +412,7 @@ Can be overridden with the `--jobs` CLI option.
 
 #### `build.rustc`
 * Type: string (program path)
-* Default: "rustc"
+* Default: `"rustc"`
 * Environment: `CARGO_BUILD_RUSTC` or `RUSTC`
 
 Sets the executable to use for `rustc`.
@@ -426,7 +442,7 @@ the final invocation is `$RUSTC_WRAPPER $RUSTC_WORKSPACE_WRAPPER $RUSTC`.
 
 #### `build.rustdoc`
 * Type: string (program path)
-* Default: "rustdoc"
+* Default: `"rustdoc"`
 * Environment: `CARGO_BUILD_RUSTDOC` or `RUSTDOC`
 
 Sets the executable to use for `rustdoc`.
@@ -453,7 +469,7 @@ target = ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu"]
 
 #### `build.target-dir`
 * Type: string (path)
-* Default: "target"
+* Default: `"target"`
 * Environment: `CARGO_BUILD_TARGET_DIR` or `CARGO_TARGET_DIR`
 
 The path to where all compiler output is placed. The default if not specified
@@ -541,7 +557,7 @@ overrides the config setting.
 * Environment: `CARGO_BUILD_DEP_INFO_BASEDIR`
 
 Strips the given path prefix from [dep
-info](../guide/build-cache.md#dep-info-files) file paths. This config setting
+info](../reference/build-cache.md#dep-info-files) file paths. This config setting
 is intended to convert absolute paths to relative paths for tools that require
 relative paths.
 
@@ -601,7 +617,7 @@ This option is deprecated and unused.
 
 #### `cargo-new.vcs`
 * Type: string
-* Default: "git" or "none"
+* Default: `"git"` or `"none"`
 * Environment: `CARGO_CARGO_NEW_VCS`
 
 Specifies the source control system to use for initializing a new repository.
@@ -639,7 +655,7 @@ The `[future-incompat-report]` table controls setting for [future incompat repor
 
 #### `future-incompat-report.frequency`
 * Type: string
-* Default: "always"
+* Default: `"always"`
 * Environment: `CARGO_FUTURE_INCOMPAT_REPORT_FREQUENCY`
 
 Controls how often we display a notification to the terminal when a future incompat report is available. Possible values:
@@ -705,15 +721,15 @@ performed. This only works on Windows.
 * Environment: `CARGO_HTTP_SSL_VERSION`
 
 This sets the minimum TLS version to use. It takes a string, with one of the
-possible values of "default", "tlsv1", "tlsv1.0", "tlsv1.1", "tlsv1.2", or
-"tlsv1.3".
+possible values of `"default"`, `"tlsv1"`, `"tlsv1.0"`, `"tlsv1.1"`, `"tlsv1.2"`, or
+`"tlsv1.3"`.
 
 This may alternatively take a table with two keys, `min` and `max`, which each
 take a string value of the same kind that specifies the minimum and maximum
 range of TLS versions to use.
 
-The default is a minimum version of "tlsv1.0" and a max of the newest version
-supported on your platform, typically "tlsv1.3".
+The default is a minimum version of `"tlsv1.0"` and a max of the newest version
+supported on your platform, typically `"tlsv1.3"`.
 
 #### `http.low-speed-limit`
 * Type: integer
@@ -903,13 +919,6 @@ See [debug](profiles.md#debug).
 
 See [split-debuginfo](profiles.md#split-debuginfo).
 
-#### `profile.<name>.strip`
-* Type: string or boolean
-* Default: See profile docs.
-* Environment: `CARGO_PROFILE_<name>_STRIP`
-
-See [strip](profiles.md#strip).
-
 #### `profile.<name>.debug-assertions`
 * Type: boolean
 * Default: See profile docs.
@@ -960,12 +969,36 @@ See [panic](profiles.md#panic).
 See [rpath](profiles.md#rpath).
 
 #### `profile.<name>.strip`
-* Type: string
+* Type: string or boolean
 * Default: See profile docs.
 * Environment: `CARGO_PROFILE_<name>_STRIP`
 
 See [strip](profiles.md#strip).
 
+### `[resolver]`
+
+The `[resolver]` table overrides [dependency resolution behavior](resolver.md) for local development (e.g. excludes `cargo install`).
+
+#### `resolver.incompatible-rust-versions`
+* Type: string
+* Default: See [`resolver`](resolver.md#resolver-versions) docs
+* Environment: `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS`
+
+When resolving which version of a dependency to use, select how versions with incompatible `package.rust-version`s are treated.
+Values include:
+- `allow`: treat `rust-version`-incompatible versions like any other version
+- `fallback`: only consider `rust-version`-incompatible versions if no other version matched
+
+Can be overridden with
+- `--ignore-rust-version` CLI option
+- Setting the dependency's version requirement higher than any version with a compatible `rust-version`
+- Specifying the version to `cargo update` with `--precise`
+
+See the [resolver](resolver.md#rust-version) chapter for more details.
+
+> **MSRV:**
+> - `allow` is supported on any version
+> - `fallback` is respected as of 1.84
 
 ### `[registries]`
 
@@ -1008,7 +1041,7 @@ See [Registry Authentication](registry-authentication.md) for more information.
 
 #### `registries.crates-io.protocol`
 * Type: string
-* Default: `sparse`
+* Default: `"sparse"`
 * Environment: `CARGO_REGISTRIES_CRATES_IO_PROTOCOL`
 
 Specifies the protocol used to access crates.io. Allowed values are `git` or `sparse`.
@@ -1170,9 +1203,9 @@ rustflags = ["…", "…"]
 ```
 
 `cfg` values come from those built-in to the compiler (run `rustc --print=cfg`
-to view), values set by [build scripts], and extra `--cfg` flags passed to
-`rustc` (such as those defined in `RUSTFLAGS`). Do not try to match on
-`debug_assertions` or Cargo features like `feature="foo"`.
+to view) and extra `--cfg` flags passed to `rustc` (such as those defined in
+`RUSTFLAGS`). Do not try to match on `debug_assertions`, `test`, Cargo features
+like `feature="foo"`, or values set by [build scripts].
 
 If using a target spec JSON file, the [`<triple>`] value is the filename stem.
 For example `--target foo/bar.json` would match `[target.bar]`.
@@ -1284,7 +1317,7 @@ Specifying the `--verbose` flag will override and force verbose output.
 
 #### `term.color`
 * Type: string
-* Default: "auto"
+* Default: `"auto"`
 * Environment: `CARGO_TERM_COLOR`
 
 Controls whether or not colored output is used in the terminal. Possible values:
@@ -1312,7 +1345,7 @@ Control whether output can be rendered using non-ASCII unicode characters.
 
 #### `term.progress.when`
 * Type: string
-* Default: "auto"
+* Default: `"auto"`
 * Environment: `CARGO_TERM_PROGRESS_WHEN`
 
 Controls whether or not progress bar is shown in the terminal. Possible values:
@@ -1347,7 +1380,7 @@ Sets the width for progress bar.
 [toml]: https://toml.io/
 [incremental compilation]: profiles.md#incremental
 [program path with args]: #executable-paths-with-arguments
-[libcurl format]: https://everything.curl.dev/libcurl/proxies#proxy-types
+[libcurl format]: https://everything.curl.dev/transfers/conn/proxies#proxy-types
 [source replacement]: source-replacement.md
 [revision]: https://git-scm.com/docs/gitrevisions
 [registries]: registries.md

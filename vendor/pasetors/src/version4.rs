@@ -95,7 +95,7 @@ impl Generate<SymmetricKey<V4>, V4> for SymmetricKey<V4> {
     fn generate() -> Result<SymmetricKey<V4>, Error> {
         let mut rng_bytes = vec![0u8; V4::LOCAL_KEY];
         V4::validate_local_key(&rng_bytes)?;
-        getrandom::getrandom(&mut rng_bytes)?;
+        getrandom::fill(&mut rng_bytes)?;
 
         Ok(Self {
             bytes: rng_bytes,
@@ -187,8 +187,8 @@ impl LocalToken {
     /// Domain separator for key-splitting the authentication key (24 in length as bytes).
     const DOMAIN_SEPARATOR_AUTH: &'static str = "paseto-auth-key-for-aead";
 
-    const M1_LEN: usize = V4::LOCAL_NONCE + Self::DOMAIN_SEPARATOR_ENC.as_bytes().len();
-    const M2_LEN: usize = V4::LOCAL_NONCE + Self::DOMAIN_SEPARATOR_AUTH.as_bytes().len();
+    const M1_LEN: usize = V4::LOCAL_NONCE + Self::DOMAIN_SEPARATOR_ENC.len();
+    const M2_LEN: usize = V4::LOCAL_NONCE + Self::DOMAIN_SEPARATOR_AUTH.len();
 
     /// Split the user-provided secret key into keys used for encryption and authentication.
     fn key_split(sk: &[u8], n: &[u8]) -> Result<(EncKey, EncNonce, AuthKey), Error> {
@@ -274,7 +274,7 @@ impl LocalToken {
         }
 
         let mut n = [0u8; V4::LOCAL_NONCE];
-        getrandom::getrandom(&mut n)?;
+        getrandom::fill(&mut n)?;
 
         Self::encrypt_with_nonce(secret_key, &n, message, footer, implicit_assert)
     }
@@ -305,7 +305,7 @@ impl LocalToken {
 
         let pre_auth = pae::pae(&[Self::HEADER.as_bytes(), n.as_ref(), c, f, i])?;
         let expected_tag = blake2b::Tag::from_slice(t).map_err(|_| Error::TokenValidation)?;
-        blake2b::Blake2b::verify(&expected_tag, &auth_key, 32, pre_auth.as_slice())
+        Blake2b::verify(&expected_tag, &auth_key, 32, pre_auth.as_slice())
             .map_err(|_| Error::TokenValidation)?;
 
         let mut out = vec![0u8; c.len()];
@@ -337,7 +337,7 @@ mod test_vectors {
             SymmetricKey::<V4>::from(&hex::decode(test.key.as_ref().unwrap()).unwrap()).unwrap();
 
         let nonce = hex::decode(test.nonce.as_ref().unwrap()).unwrap();
-        let footer: Option<&[u8]> = if test.footer.as_bytes().is_empty() {
+        let footer: Option<&[u8]> = if test.footer.is_empty() {
             None
         } else {
             Some(test.footer.as_bytes())
@@ -397,7 +397,7 @@ mod test_vectors {
             &hex::decode(test.public_key.as_ref().unwrap()).unwrap(),
         )
         .unwrap();
-        let footer: Option<&[u8]> = if test.footer.as_bytes().is_empty() {
+        let footer: Option<&[u8]> = if test.footer.is_empty() {
             None
         } else {
             Some(test.footer.as_bytes())

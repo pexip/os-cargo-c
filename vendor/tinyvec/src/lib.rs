@@ -9,12 +9,13 @@
   feature(debugger_visualizer),
   debugger_visualizer(natvis_file = "../debug_metadata/tinyvec.natvis")
 )]
-#![cfg_attr(docs_rs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(clippy::missing_inline_in_public_items)]
 #![warn(clippy::must_use_candidate)]
 #![warn(missing_docs)]
 #![allow(clippy::borrow_deref_ref)]
 #![allow(unused_imports)]
+#![allow(unused_mut)]
 #![allow(clippy::write_with_newline)]
 #![allow(clippy::needless_return)]
 
@@ -48,6 +49,9 @@
 //! * `serde` provides a `Serialize` and `Deserialize` implementation for
 //!   [`TinyVec`] and [`ArrayVec`] types, provided the inner item also has an
 //!   implementation.
+//! * `borsh` provides a `BorshSerialize` and `BorshDeserialize` implementation
+//!   for [`TinyVec`] and [`ArrayVec`] types, provided the inner item also has
+//!   an implementation.
 //!
 //! ## API
 //! The general goal of the crate is that, as much as possible, the vecs here

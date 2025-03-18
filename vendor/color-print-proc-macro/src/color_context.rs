@@ -47,7 +47,7 @@ impl<'a> Context<'a> {
     }
 
     /// Applies a group of tags to the current context, with no return on success. Used by the
-    /// macro [`untagged!()`].
+    /// macro `untagged!()`.
     ///
     /// For each given tag:
     ///  - if the tag is an open tag, push it into the context;

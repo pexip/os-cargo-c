@@ -139,12 +139,18 @@ pub(crate) fn assert_app(cmd: &Command) {
         }
 
         // requires, r_if, r_unless
-        for req in &arg.requires {
+        for (_predicate, req_id) in &arg.requires {
             assert!(
-                cmd.id_exists(&req.1),
+                &arg.id != req_id,
+                "Argument {} cannot require itself",
+                arg.get_id()
+            );
+
+            assert!(
+                cmd.id_exists(req_id),
                 "Command {}: Argument or group '{}' specified in 'requires*' for '{}' does not exist",
                 cmd.get_name(),
-                req.1,
+                req_id,
                 arg.get_id(),
             );
         }
@@ -370,7 +376,7 @@ pub(crate) fn assert_app(cmd: &Command) {
             "Command {}: {}",
             cmd.get_name(),
             "`{bin}` template variable was removed in clap5, use `{name}` instead"
-        )
+        );
     }
 
     cmd._panic_on_missing_help(cmd.is_help_expected_set());
@@ -684,14 +690,14 @@ fn assert_arg(arg: &Arg) {
         arg.get_id(),
     );
 
-    if arg.is_takes_value_set() {
-        assert!(
-            arg.get_action().takes_values(),
-            "Argument `{}`'s selected action {:?} contradicts `takes_value`",
-            arg.get_id(),
-            arg.get_action()
-        );
-    }
+    assert!(
+        arg.get_num_args().unwrap_or(1.into()).max_values()
+            <= arg.get_action().max_num_args().max_values(),
+        "Argument `{}`'s action {:?} is incompatible with `num_args({:?})`",
+        arg.get_id(),
+        arg.get_action(),
+        arg.get_num_args().unwrap_or(1.into())
+    );
     if let Some(action_type_id) = arg.get_action().value_type_id() {
         assert_eq!(
             action_type_id,

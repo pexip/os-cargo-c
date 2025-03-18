@@ -27,7 +27,7 @@
 //!   * Good for: `.cargo/config.toml`, `config.json` index file (gate: `-Z`)
 //!
 //! For features that touch multiple parts of Cargo, multiple feature gating strategies (error,
-//! warn, ignore) and mechnisms (`-Z`, `cargo-features`) may be used.
+//! warn, ignore) and mechanisms (`-Z`, `cargo-features`) may be used.
 //!
 //! When adding new tests for your feature, usually the tests should go into a
 //! new module of the testsuite named after the feature. See
@@ -121,6 +121,7 @@
 use std::collections::BTreeSet;
 use std::env;
 use std::fmt::{self, Write};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::{bail, Error};
@@ -136,7 +137,7 @@ pub const SEE_CHANNELS: &str =
     "See https://doc.rust-lang.org/book/appendix-07-nightly-rust.html for more information \
      about Rust release channels.";
 
-/// Value of [`allow-features`](CliUnstable::allow_features]
+/// Value of [`allow-features`](CliUnstable::allow_features)
 pub type AllowFeatures = BTreeSet<String>;
 
 /// The edition of the compiler ([RFC 2052])
@@ -161,6 +162,7 @@ pub type AllowFeatures = BTreeSet<String>;
 /// - Set [`LATEST_UNSTABLE`] to None.
 /// - Set [`LATEST_STABLE`] to the new version.
 /// - Update [`is_stable`] to `true`.
+/// - Set [`first_version`] to the version it will be released.
 /// - Set the editionNNNN feature to stable in the [`features!`] macro invocation below.
 /// - Update any tests that are affected.
 /// - Update the man page for the `--edition` flag.
@@ -177,6 +179,7 @@ pub type AllowFeatures = BTreeSet<String>;
 /// [`LATEST_UNSTABLE`]: Edition::LATEST_UNSTABLE
 /// [`LATEST_STABLE`]: Edition::LATEST_STABLE
 /// [this example]: https://github.com/rust-lang/cargo/blob/3ebb5f15a940810f250b68821149387af583a79e/src/doc/src/reference/unstable.md?plain=1#L1238-L1264
+/// [`first_version`]: Edition::first_version
 /// [`is_stable`]: Edition::is_stable
 /// [`toml`]: crate::util::toml
 /// [`features!`]: macro.features.html
@@ -199,9 +202,9 @@ impl Edition {
     /// The latest edition that is unstable.
     ///
     /// This is `None` if there is no next unstable edition.
-    pub const LATEST_UNSTABLE: Option<Edition> = Some(Edition::Edition2024);
+    pub const LATEST_UNSTABLE: Option<Edition> = None;
     /// The latest stable edition.
-    pub const LATEST_STABLE: Edition = Edition::Edition2021;
+    pub const LATEST_STABLE: Edition = Edition::Edition2024;
     pub const ALL: &'static [Edition] = &[
         Self::Edition2015,
         Self::Edition2018,
@@ -222,7 +225,7 @@ impl Edition {
             Edition2015 => None,
             Edition2018 => Some(semver::Version::new(1, 31, 0)),
             Edition2021 => Some(semver::Version::new(1, 56, 0)),
-            Edition2024 => None,
+            Edition2024 => Some(semver::Version::new(1, 85, 0)),
         }
     }
 
@@ -233,7 +236,7 @@ impl Edition {
             Edition2015 => true,
             Edition2018 => true,
             Edition2021 => true,
-            Edition2024 => false,
+            Edition2024 => true,
         }
     }
 
@@ -343,7 +346,7 @@ impl FromStr for Edition {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Status {
     Stable,
     Unstable,
@@ -387,11 +390,11 @@ macro_rules! features {
             $(
                 $(#[$attr])*
                 #[doc = concat!("\n\n\nSee <https://doc.rust-lang.org/nightly/cargo/", $docs, ">.")]
-                pub fn $feature() -> &'static Feature {
+                pub const fn $feature() -> &'static Feature {
                     fn get(features: &Features) -> bool {
                         stab!($stab) == Status::Stable || features.$feature
                     }
-                    static FEAT: Feature = Feature {
+                    const FEAT: Feature = Feature {
                         name: stringify!($feature),
                         stability: stab!($stab),
                         version: $version,
@@ -405,6 +408,10 @@ macro_rules! features {
             /// Whether this feature is allowed to use in the given [`Features`] context.
             fn is_enabled(&self, features: &Features) -> bool {
                 (self.get)(features)
+            }
+
+            pub(crate) fn name(&self) -> &str {
+                self.name
             }
         }
 
@@ -502,18 +509,22 @@ features! {
     (stable, workspace_inheritance, "1.64", "reference/unstable.html#workspace-inheritance"),
 
     /// Support for 2024 edition.
-    (unstable, edition2024, "", "reference/unstable.html#edition-2024"),
+    (stable, edition2024, "1.85", "reference/manifest.html#the-edition-field"),
 
     /// Allow setting trim-paths in a profile to control the sanitisation of file paths in build outputs.
     (unstable, trim_paths, "", "reference/unstable.html#profile-trim-paths-option"),
 
     /// Allow multiple packages to participate in the same API namespace
     (unstable, open_namespaces, "", "reference/unstable.html#open-namespaces"),
+
+    /// Allow paths that resolve relatively to a base specified in the config.
+    (unstable, path_bases, "", "reference/unstable.html#path-bases"),
 }
 
 /// Status and metadata for a single unstable feature.
+#[derive(Debug)]
 pub struct Feature {
-    /// Feature name. This is valid Rust identifer so no dash only underscore.
+    /// Feature name. This is valid Rust identifier so no dash only underscore.
     name: &'static str,
     stability: Status,
     /// Version that this feature was stabilized or removed.
@@ -728,10 +739,9 @@ macro_rules! unstable_cli_options {
                 );
                 let mut expected = vec![$(stringify!($element)),*];
                 expected[2..].sort();
-                snapbox::assert_eq(
-                    format!("{:#?}", expected),
-                    format!("{:#?}", vec![$(stringify!($element)),*])
-                );
+                let expected = format!("{:#?}", expected);
+                let actual = format!("{:#?}", vec![$(stringify!($element)),*]);
+                snapbox::assert_data_eq!(actual, expected);
             }
         }
     }
@@ -749,11 +759,10 @@ unstable_cli_options!(
     avoid_dev_deps: bool = ("Avoid installing dev-dependencies if possible"),
     binary_dep_depinfo: bool = ("Track changes to dependency artifacts"),
     bindeps: bool = ("Allow Cargo packages to depend on bin, cdylib, and staticlib crates, and use the artifacts built by those crates"),
-    #[serde(deserialize_with = "deserialize_build_std")]
     build_std: Option<Vec<String>>  = ("Enable Cargo to compile the standard library itself as part of a crate graph compilation"),
     build_std_features: Option<Vec<String>>  = ("Configure features enabled for the standard library itself when building the standard library"),
     cargo_lints: bool = ("Enable the `[lints.cargo]` table"),
-    check_cfg: bool = ("Enable compile-time checking of `cfg` names/values/features"),
+    checksum_freshness: bool = ("Use a checksum to determine if output is fresh rather than filesystem mtime"),
     codegen_backend: bool = ("Enable the `codegen-backend` option in profiles in .cargo/config.toml file"),
     config_include: bool = ("Enable the `include` key in config files"),
     direct_minimal_versions: bool = ("Resolve minimal dependency versions instead of maximum (direct dependencies only)"),
@@ -761,7 +770,9 @@ unstable_cli_options!(
     dual_proc_macros: bool = ("Build proc-macros for both the host and the target"),
     features: Option<Vec<String>>,
     gc: bool = ("Track cache usage and \"garbage collect\" unused files"),
+    #[serde(deserialize_with = "deserialize_git_features")]
     git: Option<GitFeatures> = ("Enable support for shallow git fetch operations"),
+    #[serde(deserialize_with = "deserialize_gitoxide_features")]
     gitoxide: Option<GitoxideFeatures> = ("Use gitoxide for the given git interactions, or all of them if no argument is given"),
     host_config: bool = ("Enable the `[host]` section in the .cargo/config.toml file"),
     minimal_versions: bool = ("Resolve minimal dependency versions instead of maximum"),
@@ -769,10 +780,12 @@ unstable_cli_options!(
     mtime_on_use: bool = ("Configure Cargo to update the mtime of used files"),
     next_lockfile_bump: bool,
     no_index_update: bool = ("Do not update the registry index even if the cache is outdated"),
+    package_workspace: bool = ("Handle intra-workspace dependencies when packaging"),
     panic_abort_tests: bool = ("Enable support to run tests with -Cpanic=abort"),
     profile_rustflags: bool = ("Enable the `rustflags` option in profiles in .cargo/config.toml file"),
     public_dependency: bool = ("Respect a dependency's `public` field in Cargo.toml to control public/private dependencies"),
     publish_timeout: bool = ("Enable the `publish.timeout` key in .cargo/config.toml file"),
+    root_dir: Option<PathBuf> = ("Set the root directory relative to which paths are printed (defaults to workspace root)"),
     rustdoc_map: bool = ("Allow passing external documentation mappings to rustdoc"),
     rustdoc_scrape_examples: bool = ("Allows Rustdoc to scrape code examples from reverse-dependencies"),
     script: bool = ("Enable support for single-file, `.rs` packages"),
@@ -781,6 +794,7 @@ unstable_cli_options!(
     target_applies_to_host: bool = ("Enable the `target-applies-to-host` key in the .cargo/config.toml file"),
     trim_paths: bool = ("Enable the `trim-paths` option in profiles"),
     unstable_options: bool = ("Allow the usage of unstable options"),
+    warnings: bool = ("Allow use of the build.warnings config key"),
 );
 
 const STABILIZED_COMPILE_PROGRESS: &str = "The progress bar is now always \
@@ -855,20 +869,11 @@ const STABILIZED_REGISTRY_AUTH: &str =
 
 const STABILIZED_LINTS: &str = "The `[lints]` table is now always available.";
 
-fn deserialize_build_std<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let Some(crates) = <Option<Vec<String>>>::deserialize(deserializer)? else {
-        return Ok(None);
-    };
-    let v = crates.join(",");
-    Ok(Some(
-        crate::core::compiler::standard_lib::parse_unstable_flag(Some(&v)),
-    ))
-}
+const STABILIZED_CHECK_CFG: &str =
+    "Compile-time checking of conditional (a.k.a. `-Zcheck-cfg`) is now always enabled.";
 
-#[derive(Debug, Copy, Clone, Default, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[serde(default)]
 pub struct GitFeatures {
     /// When cloning the index, perform a shallow clone. Maintain shallowness upon subsequent fetches.
     pub shallow_index: bool,
@@ -877,12 +882,71 @@ pub struct GitFeatures {
 }
 
 impl GitFeatures {
-    fn all() -> Self {
+    pub fn all() -> Self {
         GitFeatures {
             shallow_index: true,
             shallow_deps: true,
         }
     }
+
+    fn expecting() -> String {
+        let fields = vec!["`shallow-index`", "`shallow-deps`"];
+        format!(
+            "unstable 'git' only takes {} as valid inputs",
+            fields.join(" and ")
+        )
+    }
+}
+
+fn deserialize_git_features<'de, D>(deserializer: D) -> Result<Option<GitFeatures>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    struct GitFeaturesVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for GitFeaturesVisitor {
+        type Value = Option<GitFeatures>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(&GitFeatures::expecting())
+        }
+
+        fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if v {
+                Ok(Some(GitFeatures::all()))
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(parse_git(s.split(",")).map_err(serde::de::Error::custom)?)
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::de::Deserializer<'de>,
+        {
+            let git = GitFeatures::deserialize(deserializer)?;
+            Ok(Some(git))
+        }
+
+        fn visit_map<V>(self, map: V) -> Result<Self::Value, V::Error>
+        where
+            V: serde::de::MapAccess<'de>,
+        {
+            let mvd = serde::de::value::MapAccessDeserializer::new(map);
+            Ok(Some(GitFeatures::deserialize(mvd)?))
+        }
+    }
+
+    deserializer.deserialize_any(GitFeaturesVisitor)
 }
 
 fn parse_git(it: impl Iterator<Item = impl AsRef<str>>) -> CargoResult<Option<GitFeatures>> {
@@ -897,16 +961,15 @@ fn parse_git(it: impl Iterator<Item = impl AsRef<str>>) -> CargoResult<Option<Gi
             "shallow-index" => *shallow_index = true,
             "shallow-deps" => *shallow_deps = true,
             _ => {
-                bail!(
-                    "unstable 'git' only takes 'shallow-index' and 'shallow-deps' as valid inputs"
-                )
+                bail!(GitFeatures::expecting())
             }
         }
     }
     Ok(Some(out))
 }
 
-#[derive(Debug, Copy, Clone, Default, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[serde(default)]
 pub struct GitoxideFeatures {
     /// All fetches are done with `gitoxide`, which includes git dependencies as well as the crates index.
     pub fetch: bool,
@@ -920,7 +983,7 @@ pub struct GitoxideFeatures {
 }
 
 impl GitoxideFeatures {
-    fn all() -> Self {
+    pub fn all() -> Self {
         GitoxideFeatures {
             fetch: true,
             checkout: true,
@@ -937,6 +1000,67 @@ impl GitoxideFeatures {
             internal_use_git2: false,
         }
     }
+
+    fn expecting() -> String {
+        let fields = vec!["`fetch`", "`checkout`", "`internal-use-git2`"];
+        format!(
+            "unstable 'gitoxide' only takes {} as valid inputs, for shallow fetches see `-Zgit=shallow-index,shallow-deps`",
+            fields.join(" and ")
+        )
+    }
+}
+
+fn deserialize_gitoxide_features<'de, D>(
+    deserializer: D,
+) -> Result<Option<GitoxideFeatures>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    struct GitoxideFeaturesVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for GitoxideFeaturesVisitor {
+        type Value = Option<GitoxideFeatures>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(&GitoxideFeatures::expecting())
+        }
+
+        fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(parse_gitoxide(s.split(",")).map_err(serde::de::Error::custom)?)
+        }
+
+        fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            if v {
+                Ok(Some(GitoxideFeatures::all()))
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::de::Deserializer<'de>,
+        {
+            let gitoxide = GitoxideFeatures::deserialize(deserializer)?;
+            Ok(Some(gitoxide))
+        }
+
+        fn visit_map<V>(self, map: V) -> Result<Self::Value, V::Error>
+        where
+            V: serde::de::MapAccess<'de>,
+        {
+            let mvd = serde::de::value::MapAccessDeserializer::new(map);
+            Ok(Some(GitoxideFeatures::deserialize(mvd)?))
+        }
+    }
+
+    deserializer.deserialize_any(GitoxideFeaturesVisitor)
 }
 
 fn parse_gitoxide(
@@ -955,7 +1079,7 @@ fn parse_gitoxide(
             "checkout" => *checkout = true,
             "internal-use-git2" => *internal_use_git2 = true,
             _ => {
-                bail!("unstable 'gitoxide' only takes `fetch` and 'checkout' as valid input, for shallow fetches see `-Zgit=shallow-index,shallow-deps`")
+                bail!(GitoxideFeatures::expecting())
             }
         }
     }
@@ -1010,7 +1134,8 @@ impl CliUnstable {
             }
         }
 
-        fn parse_features(value: Option<&str>) -> Vec<String> {
+        /// Parse a comma-separated list
+        fn parse_list(value: Option<&str>) -> Vec<String> {
             match value {
                 None => Vec::new(),
                 Some("") => Vec::new(),
@@ -1059,7 +1184,7 @@ impl CliUnstable {
         match k {
             // Permanently unstable features
             // Sorted alphabetically:
-            "allow-features" => self.allow_features = Some(parse_features(v).into_iter().collect()),
+            "allow-features" => self.allow_features = Some(parse_list(v).into_iter().collect()),
             "print-im-a-teapot" => self.print_im_a_teapot = parse_bool(k, v)?,
 
             // Stabilized features
@@ -1078,7 +1203,7 @@ impl CliUnstable {
                 // until we feel confident to remove entirely.
                 //
                 // See rust-lang/cargo#11168
-                let feats = parse_features(v);
+                let feats = parse_list(v);
                 let stab_is_not_empty = feats.iter().any(|feat| {
                     matches!(
                         feat.as_str(),
@@ -1109,6 +1234,7 @@ impl CliUnstable {
             "credential-process" => stabilized_warn(k, "1.74", STABILIZED_CREDENTIAL_PROCESS),
             "lints" => stabilized_warn(k, "1.74", STABILIZED_LINTS),
             "registry-auth" => stabilized_warn(k, "1.74", STABILIZED_REGISTRY_AUTH),
+            "check-cfg" => stabilized_warn(k, "1.80", STABILIZED_CHECK_CFG),
 
             // Unstable features
             // Sorted alphabetically:
@@ -1117,14 +1243,9 @@ impl CliUnstable {
             "avoid-dev-deps" => self.avoid_dev_deps = parse_empty(k, v)?,
             "binary-dep-depinfo" => self.binary_dep_depinfo = parse_empty(k, v)?,
             "bindeps" => self.bindeps = parse_empty(k, v)?,
-            "build-std" => {
-                self.build_std = Some(crate::core::compiler::standard_lib::parse_unstable_flag(v))
-            }
-            "build-std-features" => self.build_std_features = Some(parse_features(v)),
+            "build-std" => self.build_std = Some(parse_list(v)),
+            "build-std-features" => self.build_std_features = Some(parse_list(v)),
             "cargo-lints" => self.cargo_lints = parse_empty(k, v)?,
-            "check-cfg" => {
-                self.check_cfg = parse_empty(k, v)?;
-            }
             "codegen-backend" => self.codegen_backend = parse_empty(k, v)?,
             "config-include" => self.config_include = parse_empty(k, v)?,
             "direct-minimal-versions" => self.direct_minimal_versions = parse_empty(k, v)?,
@@ -1150,18 +1271,22 @@ impl CliUnstable {
             // can also be set in .cargo/config or with and ENV
             "mtime-on-use" => self.mtime_on_use = parse_empty(k, v)?,
             "no-index-update" => self.no_index_update = parse_empty(k, v)?,
+            "package-workspace" => self.package_workspace= parse_empty(k, v)?,
             "panic-abort-tests" => self.panic_abort_tests = parse_empty(k, v)?,
             "public-dependency" => self.public_dependency = parse_empty(k, v)?,
             "profile-rustflags" => self.profile_rustflags = parse_empty(k, v)?,
             "trim-paths" => self.trim_paths = parse_empty(k, v)?,
             "publish-timeout" => self.publish_timeout = parse_empty(k, v)?,
+            "root-dir" => self.root_dir = v.map(|v| v.into()),
             "rustdoc-map" => self.rustdoc_map = parse_empty(k, v)?,
             "rustdoc-scrape-examples" => self.rustdoc_scrape_examples = parse_empty(k, v)?,
             "separate-nightlies" => self.separate_nightlies = parse_empty(k, v)?,
+            "checksum-freshness" => self.checksum_freshness = parse_empty(k, v)?,
             "skip-rustdoc-fingerprint" => self.skip_rustdoc_fingerprint = parse_empty(k, v)?,
             "script" => self.script = parse_empty(k, v)?,
             "target-applies-to-host" => self.target_applies_to_host = parse_empty(k, v)?,
             "unstable-options" => self.unstable_options = parse_empty(k, v)?,
+            "warnings" => self.warnings = parse_empty(k, v)?,
             _ => bail!("\
             unknown `-Z` flag specified: {k}\n\n\
             For available unstable features, see https://doc.rust-lang.org/nightly/cargo/reference/unstable.html\n\

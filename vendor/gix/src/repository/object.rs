@@ -2,18 +2,33 @@
 use std::ops::DerefMut;
 
 use gix_hash::ObjectId;
-use gix_macros::momo;
-use gix_object::{Exists, Find, FindExt};
-use gix_odb::{Header, HeaderExt, Write};
+use gix_object::{Exists, Find, FindExt, Write};
+use gix_odb::{Header, HeaderExt};
 use gix_ref::{
     transaction::{LogChange, PreviousValue, RefLog},
     FullName,
 };
 use smallvec::SmallVec;
 
-use crate::{commit, ext::ObjectIdExt, object, tag, Blob, Id, Object, Reference, Tree};
+use crate::{commit, ext::ObjectIdExt, object, tag, Blob, Commit, Id, Object, Reference, Tag, Tree};
 
-/// Methods related to object creation.
+/// Tree editing
+#[cfg(feature = "tree-editor")]
+impl crate::Repository {
+    /// Return an editor for adjusting the tree at `id`.
+    ///
+    /// This can be the [empty tree id](ObjectId::empty_tree) to build a tree from scratch.
+    #[doc(alias = "treebuilder", alias = "git2")]
+    pub fn edit_tree(
+        &self,
+        id: impl Into<ObjectId>,
+    ) -> Result<object::tree::Editor<'_>, crate::repository::edit_tree::Error> {
+        let tree = self.find_tree(id)?;
+        Ok(tree.edit()?)
+    }
+}
+
+/// Find objects of various kins
 impl crate::Repository {
     /// Find the object with `id` in the object database or return an error if it could not be found.
     ///
@@ -24,7 +39,6 @@ impl crate::Repository {
     ///
     /// In order to get the kind of the object, is must be fully decoded from storage if it is packed with deltas.
     /// Loose object could be partially decoded, even though that's not implemented.
-    #[momo]
     pub fn find_object(&self, id: impl Into<ObjectId>) -> Result<Object<'_>, object::find::existing::Error> {
         let id = id.into();
         if id == ObjectId::empty_tree(self.object_hash()) {
@@ -40,11 +54,39 @@ impl crate::Repository {
         Ok(Object::from_data(id, kind, buf, self))
     }
 
+    /// Find a commit with `id` or fail if there was no object or the object wasn't a commit.
+    pub fn find_commit(
+        &self,
+        id: impl Into<ObjectId>,
+    ) -> Result<Commit<'_>, object::find::existing::with_conversion::Error> {
+        Ok(self.find_object(id)?.try_into_commit()?)
+    }
+
+    /// Find a tree with `id` or fail if there was no object or the object wasn't a tree.
+    pub fn find_tree(
+        &self,
+        id: impl Into<ObjectId>,
+    ) -> Result<Tree<'_>, object::find::existing::with_conversion::Error> {
+        Ok(self.find_object(id)?.try_into_tree()?)
+    }
+
+    /// Find an annotated tag with `id` or fail if there was no object or the object wasn't a tag.
+    pub fn find_tag(&self, id: impl Into<ObjectId>) -> Result<Tag<'_>, object::find::existing::with_conversion::Error> {
+        Ok(self.find_object(id)?.try_into_tag()?)
+    }
+
+    /// Find a blob with `id` or fail if there was no object or the object wasn't a blob.
+    pub fn find_blob(
+        &self,
+        id: impl Into<ObjectId>,
+    ) -> Result<Blob<'_>, object::find::existing::with_conversion::Error> {
+        Ok(self.find_object(id)?.try_into_blob()?)
+    }
+
     /// Obtain information about an object without fully decoding it, or fail if the object doesn't exist.
     ///
     /// Note that despite being cheaper than [`Self::find_object()`], there is still some effort traversing delta-chains.
     #[doc(alias = "read_header", alias = "git2")]
-    #[momo]
     pub fn find_header(&self, id: impl Into<ObjectId>) -> Result<gix_odb::find::Header, object::find::existing::Error> {
         let id = id.into();
         if id == ObjectId::empty_tree(self.object_hash()) {
@@ -65,10 +107,9 @@ impl crate::Repository {
     /// Use [`repo.objects.refresh_never()`](gix_odb::store::Handle::refresh_never) to avoid expensive
     /// IO-bound refreshes if an object wasn't found.
     #[doc(alias = "exists", alias = "git2")]
-    #[momo]
     pub fn has_object(&self, id: impl AsRef<gix_hash::oid>) -> bool {
         let id = id.as_ref();
-        if id == ObjectId::empty_tree(self.object_hash()) {
+        if id.to_owned().is_empty_tree() {
             true
         } else {
             self.objects.exists(id)
@@ -78,7 +119,6 @@ impl crate::Repository {
     /// Obtain information about an object without fully decoding it, or `None` if the object doesn't exist.
     ///
     /// Note that despite being cheaper than [`Self::try_find_object()`], there is still some effort traversing delta-chains.
-    #[momo]
     pub fn try_find_header(
         &self,
         id: impl Into<ObjectId>,
@@ -94,7 +134,6 @@ impl crate::Repository {
     }
 
     /// Try to find the object with `id` or return `None` if it wasn't found.
-    #[momo]
     pub fn try_find_object(&self, id: impl Into<ObjectId>) -> Result<Option<Object<'_>>, object::find::Error> {
         let id = id.into();
         if id == ObjectId::empty_tree(self.object_hash()) {
@@ -115,26 +154,19 @@ impl crate::Repository {
             None => Ok(None),
         }
     }
+}
 
-    fn shared_empty_buf(&self) -> std::cell::RefMut<'_, Vec<u8>> {
-        let mut bufs = self.bufs.borrow_mut();
-        if bufs.last().is_none() {
-            bufs.push(Vec::with_capacity(512));
-        }
-        std::cell::RefMut::map(bufs, |bufs| {
-            let buf = bufs.last_mut().expect("we assure one is present");
-            buf.clear();
-            buf
-        })
-    }
-
+/// Write objects of any type.
+impl crate::Repository {
     /// Write the given object into the object database and return its object id.
     ///
     /// Note that we hash the object in memory to avoid storing objects that are already present. That way,
     /// we avoid writing duplicate objects using slow disks that will eventually have to be garbage collected.
     pub fn write_object(&self, object: impl gix_object::WriteTo) -> Result<Id<'_>, object::write::Error> {
-        let mut buf = self.shared_empty_buf();
-        object.write_to(buf.deref_mut()).expect("write to memory works");
+        let mut buf = self.empty_reusable_buffer();
+        object
+            .write_to(buf.deref_mut())
+            .map_err(|err| Box::new(err) as Box<dyn std::error::Error + Send + Sync + 'static>)?;
 
         self.write_object_inner(&buf, object.kind())
     }
@@ -155,7 +187,6 @@ impl crate::Repository {
     ///
     /// We avoid writing duplicate objects to slow disks that will eventually have to be garbage collected by
     /// pre-hashing the data, and checking if the object is already present.
-    #[momo]
     pub fn write_blob(&self, bytes: impl AsRef<[u8]>) -> Result<Id<'_>, object::write::Error> {
         let bytes = bytes.as_ref();
         let oid = gix_object::compute_hash(self.object_hash(), gix_object::Kind::Blob, bytes);
@@ -178,7 +209,7 @@ impl crate::Repository {
         &self,
         mut bytes: impl std::io::Read + std::io::Seek,
     ) -> Result<Id<'_>, object::write::Error> {
-        let mut buf = self.shared_empty_buf();
+        let mut buf = self.empty_reusable_buffer();
         std::io::copy(&mut bytes, buf.deref_mut()).expect("write to memory works");
 
         self.write_blob_stream_inner(&buf)
@@ -195,13 +226,15 @@ impl crate::Repository {
             .map_err(Into::into)
             .map(|oid| oid.attach(self))
     }
+}
 
+/// Create commits and tags
+impl crate::Repository {
     /// Create a tag reference named `name` (without `refs/tags/` prefix) pointing to a newly created tag object
     /// which in turn points to `target` and return the newly created reference.
     ///
     /// It will be created with `constraint` which is most commonly to [only create it][PreviousValue::MustNotExist]
     /// or to [force overwriting a possibly existing tag](PreviousValue::Any).
-    #[momo]
     pub fn tag(
         &self,
         name: impl AsRef<str>,
@@ -283,7 +316,7 @@ impl crate::Repository {
                     force_create_reflog: false,
                     message: crate::reference::log::message("commit", commit.message.as_ref(), commit.parents.len()),
                 },
-                expected: match commit.parents.first().map(|p| Target::Peeled(*p)) {
+                expected: match commit.parents.first().map(|p| Target::Object(*p)) {
                     Some(previous) => {
                         if reference.as_bstr() == "HEAD" {
                             PreviousValue::MustExistAndMatch(previous)
@@ -293,7 +326,7 @@ impl crate::Repository {
                     }
                     None => PreviousValue::MustNotExist,
                 },
-                new: Target::Peeled(commit_id.inner),
+                new: Target::Object(commit_id.inner),
             },
             name: reference,
             deref: true,

@@ -24,7 +24,7 @@ pub(crate) fn encode_key(this: &Key, buf: &mut dyn Write, input: Option<&str>) -
         repr.encode(buf, input)?;
     } else {
         let repr = this.display_repr();
-        write!(buf, "{}", repr)?;
+        write!(buf, "{repr}")?;
     };
 
     Ok(())
@@ -109,7 +109,7 @@ pub(crate) fn encode_formatted<T: ValueRepr>(
         repr.encode(buf, input)?;
     } else {
         let repr = this.display_repr();
-        write!(buf, "{}", repr)?;
+        write!(buf, "{repr}")?;
     };
 
     decor.suffix_encode(buf, input, default_decor.1)?;
@@ -237,17 +237,17 @@ where
         callback(table, path, is_array_of_tables)?;
     }
 
-    for kv in table.items.values() {
-        match kv.value {
+    for (key, value) in table.items.iter() {
+        match value {
             Item::Table(ref t) => {
-                let key = kv.key.clone();
+                let key = key.clone();
                 path.push(key);
                 visit_nested_tables(t, path, false, callback)?;
                 path.pop();
             }
             Item::ArrayOfTables(ref a) => {
                 for t in a.iter() {
-                    let key = kv.key.clone();
+                    let key = key.clone();
                     path.push(key);
                     visit_nested_tables(t, path, true, callback)?;
                     path.pop();
@@ -332,12 +332,7 @@ pub(crate) fn to_string_repr(
     style: Option<StringStyle>,
     literal: Option<bool>,
 ) -> Repr {
-    let (style, literal) = match (style, literal) {
-        (Some(style), Some(literal)) => (style, literal),
-        (_, Some(literal)) => (infer_style(value).0, literal),
-        (Some(style), _) => (style, infer_style(value).1),
-        (_, _) => infer_style(value),
-    };
+    let (style, literal) = infer_style(value, style, literal);
 
     let mut output = String::with_capacity(value.len() * 2);
     if literal {
@@ -415,7 +410,38 @@ impl StringStyle {
     }
 }
 
-fn infer_style(value: &str) -> (StringStyle, bool) {
+fn infer_style(
+    value: &str,
+    style: Option<StringStyle>,
+    literal: Option<bool>,
+) -> (StringStyle, bool) {
+    match (style, literal) {
+        (Some(style), Some(literal)) => (style, literal),
+        (None, Some(literal)) => (infer_all_style(value).0, literal),
+        (Some(style), None) => {
+            let literal = infer_literal(value);
+            (style, literal)
+        }
+        (None, None) => infer_all_style(value),
+    }
+}
+
+fn infer_literal(value: &str) -> bool {
+    #[cfg(feature = "parse")]
+    {
+        use winnow::stream::ContainsToken as _;
+        (value.contains('"') | value.contains('\\'))
+            && value
+                .chars()
+                .all(|c| crate::parser::strings::LITERAL_CHAR.contains_token(c))
+    }
+    #[cfg(not(feature = "parse"))]
+    {
+        false
+    }
+}
+
+fn infer_all_style(value: &str) -> (StringStyle, bool) {
     // We need to determine:
     // - if we are a "multi-line" pretty (if there are \n)
     // - if ['''] appears if multi or ['] if single
@@ -507,9 +533,9 @@ fn to_f64_repr(f: f64) -> Repr {
         (false, false, true) => "0.0".to_owned(),
         (_, false, false) => {
             if f % 1.0 == 0.0 {
-                format!("{}.0", f)
+                format!("{f}.0")
             } else {
-                format!("{}", f)
+                format!("{f}")
             }
         }
     };
@@ -525,5 +551,47 @@ impl ValueRepr for bool {
 impl ValueRepr for Datetime {
     fn to_repr(&self) -> Repr {
         Repr::new_unchecked(self.to_string())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        #[cfg(feature = "parse")]
+        fn parseable_string(string in "\\PC*") {
+            let string = Value::from(string);
+            let encoded = string.to_string();
+            let _: Value = encoded.parse().unwrap_or_else(|err| {
+                panic!("error: {err}
+
+string:
+```
+{string}
+```
+")
+            });
+        }
+    }
+
+    proptest! {
+        #[test]
+        #[cfg(feature = "parse")]
+        fn parseable_key(string in "\\PC*") {
+            let string = Key::new(string);
+            let encoded = string.to_string();
+            let _: Key = encoded.parse().unwrap_or_else(|err| {
+                panic!("error: {err}
+
+string:
+```
+{string}
+```
+")
+            });
+        }
     }
 }

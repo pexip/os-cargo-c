@@ -13,12 +13,12 @@ use crate::{
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct ValueMut<'borrow, 'lookup, 'event> {
     pub(crate) section: SectionMut<'borrow, 'event>,
-    pub(crate) key: section::Key<'lookup>,
+    pub(crate) key: section::ValueName<'lookup>,
     pub(crate) index: Index,
     pub(crate) size: Size,
 }
 
-impl<'borrow, 'lookup, 'event> ValueMut<'borrow, 'lookup, 'event> {
+impl<'borrow, 'event> ValueMut<'borrow, '_, 'event> {
     /// Returns the actual value. This is computed each time this is called
     /// requiring an allocation for multi-line values.
     pub fn get(&self) -> Result<Cow<'_, BStr>, lookup::existing::Error> {

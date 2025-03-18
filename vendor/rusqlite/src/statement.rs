@@ -1,4 +1,3 @@
-use std::iter::IntoIterator;
 use std::os::raw::{c_int, c_void};
 #[cfg(feature = "array")]
 use std::rc::Rc;
@@ -442,7 +441,8 @@ impl Statement<'_> {
     #[inline]
     pub fn parameter_name(&self, index: usize) -> Option<&'_ str> {
         self.stmt.bind_parameter_name(index as i32).map(|name| {
-            str::from_utf8(name.to_bytes()).expect("Invalid UTF-8 sequence in parameter name")
+            name.to_str()
+                .expect("Invalid UTF-8 sequence in parameter name")
         })
     }
 
@@ -561,7 +561,7 @@ impl Statement<'_> {
     ///
     /// Any unbound parameters will have `NULL` as their value.
     ///
-    /// This should not generally be used outside of special cases, and
+    /// This should not generally be used outside special cases, and
     /// functions in the [`Statement::execute`] family should be preferred.
     ///
     /// # Failure
@@ -580,7 +580,7 @@ impl Statement<'_> {
     ///
     /// Any unbound parameters will have `NULL` as their value.
     ///
-    /// This should not generally be used outside of special cases, and
+    /// This should not generally be used outside special cases, and
     /// functions in the [`Statement::query`] family should be preferred.
     ///
     /// Note that if the SQL does not return results, [`Statement::raw_execute`]
@@ -767,7 +767,7 @@ impl fmt::Debug for Statement<'_> {
         let sql = if self.stmt.is_null() {
             Ok("")
         } else {
-            str::from_utf8(self.stmt.sql().unwrap().to_bytes())
+            self.stmt.sql().unwrap().to_str()
         };
         f.debug_struct("Statement")
             .field("conn", self.conn)
@@ -1019,7 +1019,7 @@ mod test {
         let doubled_id: i32 = rows.next().unwrap()?;
         assert_eq!(1, doubled_id);
 
-        // second row should be Err
+        // second row should be an `Err`
         #[allow(clippy::match_wild_err_arm)]
         match rows.next().unwrap() {
             Ok(_) => panic!("invalid Ok"),

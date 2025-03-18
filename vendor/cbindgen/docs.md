@@ -68,6 +68,23 @@ fn main() {
 
 You can add configuration options using the [`Builder`](https://docs.rs/cbindgen/*/cbindgen/struct.Builder.html#methods) interface.
 
+When actively working on code, you likely don't want cbindgen to fail the entire build. Instead of expect-ing the result of the header generation, you could [ignore parse errors](https://github.com/mozilla/cbindgen/issues/472#issuecomment-831439826) and let rustc or your code analysis bring up:
+
+```rust
+    // ...
+    .generate()
+    .map_or_else(
+        |error| match error {
+            cbindgen::Error::ParseSyntaxError { .. } => {}
+            e => panic!("{:?}", e),
+        },
+        |bindings| {
+            bindings.write_to_file("target/include/bindings.h");
+        },
+    );
+}
+```
+
 Be sure to add the following section to your Cargo.toml:
 
 ```
@@ -77,9 +94,18 @@ cbindgen = "0.24.0"
 
 If you'd like to use a `build.rs` script with a `cbindgen.toml`, consider using [`cbindgen::generate()`](https://docs.rs/cbindgen/*/cbindgen/fn.generate.html) instead.
 
+## Internal Representation
 
+Some users may find it useful to access the **unstable** internal representation (IR) that cbindgen uses to parse and generate code. By default, the IR is private, but you can access it by enabling the `"unstable_ir"` feature flag like so:
 
+```
+[build-dependencies]
+cbindgen = { version = "0.27.0", features = ["unstable_ir"] }
+```
 
+This opens up the `cbindgen::bindgen::ir` module.
+
+Please remember that the IR is **not stable**, so if you use this feature, you will need to pin cbindgen to avoid breakages.
 
 # Writing Your C API
 
@@ -261,6 +287,23 @@ pub mod my_interesting_mod;
 
 /// cbindgen:ignore
 pub mod my_uninteresting_mod; // This won't be scanned by cbindgen.
+```
+
+### No export annotation
+
+cbindgen will usually emit all items it finds, as instructed by the parse and export config sections. This annotation will make cbindgen skip this item from the output, while still being aware of it. This is useful for a) suppressing "Can't find" errors and b) emitting `struct my_struct` for types in a different header (rather than a bare `my_struct`).
+
+There is no equivalent config for this annotation - by comparison, the export exclude config will cause cbindgen to not be aware of the item at all.
+
+Note that cbindgen will still traverse `no-export` structs that are `repr(C)` to emit types present in the fields. You will need to manually exclude those types in your config if desired.
+
+```
+/// cbindgen:no-export
+#[repr(C)]
+pub struct Foo { .. }; // This won't be emitted by cbindgen in the header
+
+#[repr(C)]
+fn bar() -> Foo { .. } // Will be emitted as `struct foo bar();`
 ```
 
 ### Struct Annotations
@@ -915,6 +958,23 @@ deprecated = "DEPRECATED_ENUM"
 # platform-specific way. e.g. "DEPRECATED_ENUM_WITH_NOTE(note)"
 # default: nothing is emitted for deprecated enums
 deprecated_with_notes = "DEPRECATED_ENUM_WITH_NOTE"
+
+# An optional string that should come after the name of any enum variant which has been
+# marked as `#[deprecated]` without note. For instance, "__attribute__((deprecated))"
+# would be a reasonable value if targeting gcc/clang. A more portable solution would
+# involve emitting the name of a macro which you define in a platform-specific
+# way. e.g. "DEPRECATED_ENUM_VARIANT"
+# default: nothing is emitted for deprecated enum variants
+deprecated_variant = "DEPRECATED_ENUM_VARIANT"
+
+# An optional string that should come after the name of any enum variant which has been
+# marked as `#[deprecated(note = "reason")]`. `{}` will be replaced with the
+# double-quoted string. For instance, "__attribute__((deprecated({})))" would be a
+# reasonable value if targeting gcc/clang. A more portable solution would involve
+# emitting the name of a macro which you define in a platform-specific
+# way. e.g. "DEPRECATED_ENUM_WITH_NOTE(note)"
+# default: nothing is emitted for deprecated enum variants
+deprecated_variant_with_notes = "DEPRECATED_ENUM_VARIANT_WITH_NOTE({})"
 
 # Whether enums with fields should generate destructors. This exists so that generic
 # enums can be properly instantiated with payloads that are C++ types with

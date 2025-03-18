@@ -115,7 +115,7 @@ impl Repository {
         let untracked = self
             .config
             .resolved
-            .string("status", None, "showUntrackedFiles")
+            .string(config::tree::Status::SHOW_UNTRACKED_FILES)
             .map(|value| {
                 config::tree::Status::SHOW_UNTRACKED_FILES
                     .try_into_show_untracked_files(value)
@@ -128,7 +128,6 @@ impl Repository {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod is_dirty {
     use crate::Repository;
 
@@ -176,5 +175,4 @@ pub mod is_dirty {
 mod platform;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod index_worktree;

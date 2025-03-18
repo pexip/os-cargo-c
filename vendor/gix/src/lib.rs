@@ -127,7 +127,6 @@ pub use gix_object::bstr;
 pub use gix_odb as odb;
 #[cfg(feature = "credentials")]
 pub use gix_prompt as prompt;
-#[cfg(feature = "gix-protocol")]
 pub use gix_protocol as protocol;
 pub use gix_ref as refs;
 pub use gix_refspec as refspec;
@@ -140,26 +139,28 @@ pub use gix_url as url;
 #[doc(inline)]
 pub use gix_url::Url;
 pub use gix_utils as utils;
+pub use gix_validate as validate;
 pub use hash::{oid, ObjectId};
 
 pub mod interrupt;
 
 mod ext;
 ///
-#[allow(clippy::empty_docs)]
 pub mod prelude;
 
 #[cfg(feature = "excludes")]
 mod attribute_stack;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod path;
 
 /// The standard type for a store to handle git references.
 pub type RefStore = gix_ref::file::Store;
 /// A handle for finding objects in an object database, abstracting away caches for thread-local use.
-pub type OdbHandle = gix_odb::Handle;
+pub type OdbHandle = gix_odb::memory::Proxy<gix_odb::Handle>;
+/// A handle for finding objects in an object database, abstracting away caches for moving across threads.
+pub type OdbHandleArc = gix_odb::memory::Proxy<gix_odb::HandleArc>;
+
 /// A way to access git configuration
 pub(crate) type Config = OwnShared<gix_config::File<'static>>;
 
@@ -174,12 +175,10 @@ pub use types::{
 pub use types::{Pathspec, PathspecDetached, Submodule};
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod clone;
 pub mod commit;
 ///
 #[cfg(feature = "dirwalk")]
-#[allow(clippy::empty_docs)]
 pub mod dirwalk;
 pub mod head;
 pub mod id;
@@ -195,15 +194,16 @@ pub mod tag;
 pub(crate) mod util;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod progress;
 ///
-#[allow(clippy::empty_docs)]
 pub mod push;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod diff;
+
+///
+#[cfg(feature = "merge")]
+pub mod merge;
 
 /// See [`ThreadSafeRepository::discover()`], but returns a [`Repository`] instead.
 ///
@@ -212,7 +212,7 @@ pub mod diff;
 /// **The discovered repository might not be suitable for any operation that requires authentication with remotes**
 /// as it doesn't see the relevant git configuration.
 ///
-/// To achieve that, one has to [enable `git_binary` configuration](https://github.com/Byron/gitoxide/blob/9723e1addf52cc336d59322de039ea0537cdca36/src/plumbing/main.rs#L86)
+/// To achieve that, one has to [enable `git_binary` configuration](https://github.com/GitoxideLabs/gitoxide/blob/9723e1addf52cc336d59322de039ea0537cdca36/src/plumbing/main.rs#L86)
 /// in the open-options and use [`ThreadSafeRepository::discover_opts()`] instead. Alternatively, it might be well-known
 /// that the tool is going to run in a neatly configured environment without relying on bundled configuration.
 #[allow(clippy::result_large_err)]
@@ -295,24 +295,19 @@ pub fn open_opts(directory: impl Into<std::path::PathBuf>, options: open::Option
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod create;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod open;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod config;
 
 ///
-#[allow(clippy::empty_docs)]
 #[cfg(feature = "mailmap")]
 pub mod mailmap;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod worktree;
 
 pub mod revision;
@@ -321,27 +316,22 @@ pub mod revision;
 pub mod filter;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod remote;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod init;
 
 /// Not to be confused with 'status'.
 pub mod state;
 
 ///
-#[allow(clippy::empty_docs)]
 #[cfg(feature = "status")]
 pub mod status;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod shallow;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod discover;
 
 pub mod env;

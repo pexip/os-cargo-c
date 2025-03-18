@@ -61,7 +61,7 @@ pub struct Context {
 pub fn helper_outcome_to_result(outcome: Option<helper::Outcome>, action: helper::Action) -> Result {
     fn redact(mut ctx: Context) -> Context {
         if let Some(pw) = ctx.password.as_mut() {
-            *pw = "<redacted>".into()
+            *pw = "<redacted>".into();
         }
         ctx
     }
@@ -83,5 +83,4 @@ pub fn helper_outcome_to_result(outcome: Option<helper::Outcome>, action: helper
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod context;

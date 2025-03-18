@@ -47,7 +47,14 @@
 #include <sstream>
 #include <tuple>
 
-#include <openssl/err.h>
+#include "ssl_compat.h"
+
+#ifdef NGHTTP2_OPENSSL_IS_WOLFSSL
+#  include <wolfssl/options.h>
+#  include <wolfssl/openssl/err.h>
+#else // !NGHTTP2_OPENSSL_IS_WOLFSSL
+#  include <openssl/err.h>
+#endif // !NGHTTP2_OPENSSL_IS_WOLFSSL
 
 #ifdef HAVE_JANSSON
 #  include <jansson.h>
@@ -59,7 +66,6 @@
 #include "base64.h"
 #include "tls.h"
 #include "template.h"
-#include "ssl_compat.h"
 
 #ifndef O_BINARY
 #  define O_BINARY (0)
@@ -89,42 +95,42 @@ enum {
 };
 
 namespace {
-constexpr auto anchors = std::array<Anchor, 5>{{
-    {3, 0, 201},
-    {5, 0, 101},
-    {7, 0, 1},
-    {9, 7, 1},
-    {11, 3, 1},
-}};
+constexpr auto anchors = std::to_array<Anchor>({
+  {3, 0, 201},
+  {5, 0, 101},
+  {7, 0, 1},
+  {9, 7, 1},
+  {11, 3, 1},
+});
 } // namespace
 
 Config::Config()
-    : header_table_size(-1),
-      min_header_table_size(std::numeric_limits<uint32_t>::max()),
-      encoder_header_table_size(-1),
-      padding(0),
-      max_concurrent_streams(100),
-      peer_max_concurrent_streams(100),
-      multiply(1),
-      timeout(0.),
-      window_bits(-1),
-      connection_window_bits(-1),
-      verbose(0),
-      port_override(0),
-      null_out(false),
-      remote_name(false),
-      get_assets(false),
-      stat(false),
-      upgrade(false),
-      continuation(false),
-      no_content_length(false),
-      no_dep(false),
-      hexdump(false),
-      no_push(false),
-      expect_continue(false),
-      verify_peer(true),
-      ktls(false),
-      no_rfc7540_pri(false) {
+  : header_table_size(-1),
+    min_header_table_size(std::numeric_limits<uint32_t>::max()),
+    encoder_header_table_size(-1),
+    padding(0),
+    max_concurrent_streams(100),
+    peer_max_concurrent_streams(100),
+    multiply(1),
+    timeout(0.),
+    window_bits(-1),
+    connection_window_bits(-1),
+    verbose(0),
+    port_override(0),
+    null_out(false),
+    remote_name(false),
+    get_assets(false),
+    stat(false),
+    upgrade(false),
+    continuation(false),
+    no_content_length(false),
+    no_dep(false),
+    hexdump(false),
+    no_push(false),
+    expect_continue(false),
+    verify_peer(true),
+    ktls(false),
+    no_rfc7540_pri(false) {
   nghttp2_option_new(&http2_option);
   nghttp2_option_set_peer_max_concurrent_streams(http2_option,
                                                  peer_max_concurrent_streams);
@@ -159,19 +165,19 @@ std::string strip_fragment(const char *raw_uri) {
 Request::Request(const std::string &uri, const http_parser_url &u,
                  const nghttp2_data_provider2 *data_prd, int64_t data_length,
                  const nghttp2_priority_spec &pri_spec, int level)
-    : uri(uri),
-      u(u),
-      pri_spec(pri_spec),
-      data_length(data_length),
-      data_offset(0),
-      response_len(0),
-      inflater(nullptr),
-      data_prd(data_prd),
-      header_buffer_size(0),
-      stream_id(-1),
-      status(0),
-      level(level),
-      expect_final_response(false) {
+  : uri(uri),
+    u(u),
+    pri_spec(pri_spec),
+    data_length(data_length),
+    data_offset(0),
+    response_len(0),
+    inflater(nullptr),
+    data_prd(data_prd),
+    header_buffer_size(0),
+    stream_id(-1),
+    status(0),
+    level(level),
+    expect_final_response(false) {
   http2::init_hdidx(res_hdidx);
   http2::init_hdidx(req_hdidx);
 }
@@ -188,22 +194,22 @@ void Request::init_inflater() {
 
 StringRef Request::get_real_scheme() const {
   return config.scheme_override.empty()
-             ? util::get_uri_field(uri.c_str(), u, UF_SCHEMA)
-             : StringRef{config.scheme_override};
+           ? util::get_uri_field(uri.c_str(), u, UF_SCHEMA)
+           : StringRef{config.scheme_override};
 }
 
 StringRef Request::get_real_host() const {
   return config.host_override.empty()
-             ? util::get_uri_field(uri.c_str(), u, UF_HOST)
-             : StringRef{config.host_override};
+           ? util::get_uri_field(uri.c_str(), u, UF_HOST)
+           : StringRef{config.host_override};
 }
 
 uint16_t Request::get_real_port() const {
   auto scheme = get_real_scheme();
   return config.host_override.empty() ? util::has_uri_field(u, UF_PORT) ? u.port
-                                        : scheme == "https"             ? 443
+                                        : scheme == "https"_sr          ? 443
                                                                         : 80
-         : config.port_override == 0  ? scheme == "https" ? 443 : 80
+         : config.port_override == 0  ? scheme == "https"_sr ? 443 : 80
                                       : config.port_override;
 }
 
@@ -213,9 +219,9 @@ void Request::init_html_parser() {
   auto host = get_real_host();
   auto port = get_real_port();
   auto ipv6_lit =
-      std::find(std::begin(host), std::end(host), ':') != std::end(host);
+    std::find(std::begin(host), std::end(host), ':') != std::end(host);
 
-  auto base_uri = scheme.str();
+  auto base_uri = std::string{scheme};
   base_uri += "://";
   if (ipv6_lit) {
     base_uri += '[';
@@ -224,8 +230,8 @@ void Request::init_html_parser() {
   if (ipv6_lit) {
     base_uri += ']';
   }
-  if (!((scheme == "https" && port == 443) ||
-        (scheme == "http" && port == 80))) {
+  if (!((scheme == "https"_sr && port == 443) ||
+        (scheme == "http"_sr && port == 80))) {
     base_uri += ':';
     base_uri += util::utos(port);
   }
@@ -247,9 +253,9 @@ int Request::update_html_parser(const uint8_t *data, size_t len, int fin) {
 }
 
 std::string Request::make_reqpath() const {
-  std::string path = util::has_uri_field(u, UF_PATH)
-                         ? util::get_uri_field(uri.c_str(), u, UF_PATH).str()
-                         : "/";
+  auto path = util::has_uri_field(u, UF_PATH)
+                ? std::string{util::get_uri_field(uri.c_str(), u, UF_PATH)}
+                : "/"s;
   if (util::has_uri_field(u, UF_QUERY)) {
     path += '?';
     path.append(uri.c_str() + u.field_data[UF_QUERY].off,
@@ -265,22 +271,22 @@ std::string decode_host(const StringRef &host) {
   auto zone_start = std::find(std::begin(host), std::end(host), '%');
   if (zone_start == std::end(host) ||
       !util::ipv6_numeric_addr(
-          std::string(std::begin(host), zone_start).c_str())) {
-    return host.str();
+        std::string(std::begin(host), zone_start).c_str())) {
+    return std::string{host};
   }
   // case: ::1%
   if (zone_start + 1 == std::end(host)) {
-    return StringRef{host.c_str(), host.size() - 1}.str();
+    return {host.data(), host.size() - 1};
   }
   // case: ::1%12 or ::1%1
   if (zone_start + 3 >= std::end(host)) {
-    return host.str();
+    return std::string{host};
   }
   // If we see "%25", followed by more characters, then decode %25 as
   // '%'.
   auto zone_id_src = (*(zone_start + 1) == '2' && *(zone_start + 2) == '5')
-                         ? zone_start + 3
-                         : zone_start + 1;
+                       ? zone_start + 3
+                       : zone_start + 1;
   auto zone_id = util::percent_decode(zone_id_src, std::end(host));
   auto res = std::string(std::begin(host), zone_start + 1);
   res += zone_id;
@@ -423,29 +429,29 @@ int htp_msg_completecb(llhttp_t *htp) {
 
 namespace {
 constexpr llhttp_settings_t htp_hooks = {
-    htp_msg_begincb,    // llhttp_cb      on_message_begin;
-    nullptr,            // llhttp_data_cb on_url;
-    nullptr,            // llhttp_data_cb on_status;
-    nullptr,            // llhttp_data_cb on_method;
-    nullptr,            // llhttp_data_cb on_version;
-    nullptr,            // llhttp_data_cb on_header_field;
-    nullptr,            // llhttp_data_cb on_header_value;
-    nullptr,            // llhttp_data_cb on_chunk_extension_name;
-    nullptr,            // llhttp_data_cb on_chunk_extension_value;
-    nullptr,            // llhttp_cb      on_headers_complete;
-    nullptr,            // llhttp_data_cb on_body;
-    htp_msg_completecb, // llhttp_cb      on_message_complete;
-    nullptr,            // llhttp_cb      on_url_complete;
-    nullptr,            // llhttp_cb      on_status_complete;
-    nullptr,            // llhttp_cb      on_method_complete;
-    nullptr,            // llhttp_cb      on_version_complete;
-    nullptr,            // llhttp_cb      on_header_field_complete;
-    nullptr,            // llhttp_cb      on_header_value_complete;
-    nullptr,            // llhttp_cb      on_chunk_extension_name_complete;
-    nullptr,            // llhttp_cb      on_chunk_extension_value_complete;
-    nullptr,            // llhttp_cb      on_chunk_header;
-    nullptr,            // llhttp_cb      on_chunk_complete;
-    nullptr,            // llhttp_cb      on_reset;
+  htp_msg_begincb,    // llhttp_cb      on_message_begin;
+  nullptr,            // llhttp_data_cb on_url;
+  nullptr,            // llhttp_data_cb on_status;
+  nullptr,            // llhttp_data_cb on_method;
+  nullptr,            // llhttp_data_cb on_version;
+  nullptr,            // llhttp_data_cb on_header_field;
+  nullptr,            // llhttp_data_cb on_header_value;
+  nullptr,            // llhttp_data_cb on_chunk_extension_name;
+  nullptr,            // llhttp_data_cb on_chunk_extension_value;
+  nullptr,            // llhttp_cb      on_headers_complete;
+  nullptr,            // llhttp_data_cb on_body;
+  htp_msg_completecb, // llhttp_cb      on_message_complete;
+  nullptr,            // llhttp_cb      on_url_complete;
+  nullptr,            // llhttp_cb      on_status_complete;
+  nullptr,            // llhttp_cb      on_method_complete;
+  nullptr,            // llhttp_cb      on_version_complete;
+  nullptr,            // llhttp_cb      on_header_field_complete;
+  nullptr,            // llhttp_cb      on_header_value_complete;
+  nullptr,            // llhttp_cb      on_chunk_extension_name_complete;
+  nullptr,            // llhttp_cb      on_chunk_extension_value_complete;
+  nullptr,            // llhttp_cb      on_chunk_header;
+  nullptr,            // llhttp_cb      on_chunk_complete;
+  nullptr,            // llhttp_cb      on_reset;
 };
 } // namespace
 
@@ -454,7 +460,7 @@ int submit_request(HttpClient *client, const Headers &headers, Request *req) {
   auto scheme = util::get_uri_field(req->uri.c_str(), req->u, UF_SCHEMA);
   auto build_headers = Headers{{":method", req->data_prd ? "POST" : "GET"},
                                {":path", req->make_reqpath()},
-                               {":scheme", scheme.str()},
+                               {":scheme", std::string{scheme}},
                                {":authority", client->hostport},
                                {"accept", "*/*"},
                                {"accept-encoding", "gzip, deflate"},
@@ -500,7 +506,8 @@ int submit_request(HttpClient *client, const Headers &headers, Request *req) {
   nva.reserve(build_headers.size());
 
   for (auto &kv : build_headers) {
-    nva.push_back(http2::make_nv(kv.name, kv.value, kv.no_index));
+    nva.push_back(
+      http2::make_field_nv(kv.name, kv.value, http2::no_index(kv.no_index)));
   }
 
   auto method = http2::get_header(build_headers, ":method");
@@ -515,7 +522,7 @@ int submit_request(HttpClient *client, const Headers &headers, Request *req) {
       trailer_names += ", ";
       trailer_names += config.trailer[i].name;
     }
-    nva.push_back(http2::make_nv_ls("trailer", trailer_names));
+    nva.push_back(http2::make_field_v("trailer"_sr, trailer_names));
   }
 
   int32_t stream_id;
@@ -525,8 +532,8 @@ int submit_request(HttpClient *client, const Headers &headers, Request *req) {
                                        nva.data(), nva.size(), req);
   } else {
     stream_id =
-        nghttp2_submit_request2(client->session, &req->pri_spec, nva.data(),
-                                nva.size(), req->data_prd, req);
+      nghttp2_submit_request2(client->session, &req->pri_spec, nva.data(),
+                              nva.size(), req->data_prd, req);
   }
 
   if (stream_id < 0) {
@@ -595,22 +602,22 @@ void settings_timeout_cb(struct ev_loop *loop, ev_timer *w, int revents) {
 
 HttpClient::HttpClient(const nghttp2_session_callbacks *callbacks,
                        struct ev_loop *loop, SSL_CTX *ssl_ctx)
-    : wb(&mcpool),
-      session(nullptr),
-      callbacks(callbacks),
-      loop(loop),
-      ssl_ctx(ssl_ctx),
-      ssl(nullptr),
-      addrs(nullptr),
-      next_addr(nullptr),
-      cur_addr(nullptr),
-      complete(0),
-      success(0),
-      settings_payloadlen(0),
-      state(ClientState::IDLE),
-      upgrade_response_status_code(0),
-      fd(-1),
-      upgrade_response_complete(false) {
+  : wb(&mcpool),
+    session(nullptr),
+    callbacks(callbacks),
+    loop(loop),
+    ssl_ctx(ssl_ctx),
+    ssl(nullptr),
+    addrs(nullptr),
+    next_addr(nullptr),
+    cur_addr(nullptr),
+    complete(0),
+    success(0),
+    settings_payloadlen(0),
+    state(ClientState::IDLE),
+    upgrade_response_status_code(0),
+    fd(-1),
+    upgrade_response_complete(false) {
   ev_io_init(&wev, writecb, 0, EV_WRITE);
   ev_io_init(&rev, readcb, 0, EV_READ);
 
@@ -695,7 +702,7 @@ int HttpClient::initiate_connection() {
       // If the user overrode the :authority or host header, use that
       // value for the SNI extension
       const auto &host_string =
-          config.host_override.empty() ? host : config.host_override;
+        config.host_override.empty() ? host : config.host_override;
 
       auto param = SSL_get0_param(ssl);
       X509_VERIFY_PARAM_set_hostflags(param, 0);
@@ -966,8 +973,8 @@ int HttpClient::on_upgrade_connect() {
   }
   settings_payloadlen = rv;
   auto token68 =
-      base64::encode(std::begin(settings_payload),
-                     std::begin(settings_payload) + settings_payloadlen);
+    base64::encode(std::begin(settings_payload),
+                   std::begin(settings_payload) + settings_payloadlen);
   util::to_token68(token68);
 
   std::string req;
@@ -975,9 +982,9 @@ int HttpClient::on_upgrade_connect() {
     // If the request contains upload data, use OPTIONS * to upgrade
     req = "OPTIONS *";
   } else {
-    auto meth = std::find_if(
-        std::begin(config.headers), std::end(config.headers),
-        [](const Header &kv) { return util::streq_l(":method", kv.name); });
+    auto meth =
+      std::find_if(std::begin(config.headers), std::end(config.headers),
+                   [](const auto &kv) { return ":method"_sr == kv.name; });
 
     if (meth == std::end(config.headers)) {
       req = "GET ";
@@ -1049,12 +1056,12 @@ int HttpClient::on_upgrade_read(const uint8_t *data, size_t len) {
   int rv;
 
   auto htperr =
-      llhttp_execute(htp.get(), reinterpret_cast<const char *>(data), len);
+    llhttp_execute(htp.get(), reinterpret_cast<const char *>(data), len);
   auto nread = htperr == HPE_OK
-                   ? len
-                   : static_cast<size_t>(reinterpret_cast<const uint8_t *>(
-                                             llhttp_get_error_pos(htp.get())) -
-                                         data);
+                 ? len
+                 : static_cast<size_t>(reinterpret_cast<const uint8_t *>(
+                                         llhttp_get_error_pos(htp.get())) -
+                                       data);
 
   if (config.verbose) {
     std::cout.write(reinterpret_cast<const char *>(data), nread);
@@ -1135,8 +1142,8 @@ int HttpClient::connection_made() {
     }
   }
 
-  rv = nghttp2_session_client_new2(&session, callbacks, this,
-                                   config.http2_option);
+  rv =
+    nghttp2_session_client_new2(&session, callbacks, this, config.http2_option);
 
   if (rv != 0) {
     return -1;
@@ -1190,7 +1197,7 @@ int HttpClient::connection_made() {
     }
 
     rv = nghttp2_session_set_next_stream_id(
-        session, anchors[ANCHOR_FOLLOWERS].stream_id + 2);
+      session, anchors[ANCHOR_FOLLOWERS].stream_id + 2);
     if (rv != 0) {
       return -1;
     }
@@ -1424,25 +1431,24 @@ void HttpClient::update_hostport() {
   if (reqvec.empty()) {
     return;
   }
-  scheme = util::get_uri_field(reqvec[0]->uri.c_str(), reqvec[0]->u, UF_SCHEMA)
-               .str();
+  scheme = util::get_uri_field(reqvec[0]->uri.c_str(), reqvec[0]->u, UF_SCHEMA);
   std::stringstream ss;
   if (reqvec[0]->is_ipv6_literal_addr()) {
     // we may have zone ID, which must start with "%25", or "%".  RFC
     // 6874 defines "%25" only, and just "%" is allowed for just
     // convenience to end-user input.
     auto host =
-        util::get_uri_field(reqvec[0]->uri.c_str(), reqvec[0]->u, UF_HOST);
+      util::get_uri_field(reqvec[0]->uri.c_str(), reqvec[0]->u, UF_HOST);
     auto end = std::find(std::begin(host), std::end(host), '%');
     ss << "[";
-    ss.write(host.c_str(), end - std::begin(host));
+    ss.write(host.data(), end - std::begin(host));
     ss << "]";
   } else {
     util::write_uri_field(ss, reqvec[0]->uri.c_str(), reqvec[0]->u, UF_HOST);
   }
   if (util::has_uri_field(reqvec[0]->u, UF_PORT) &&
       reqvec[0]->u.port !=
-          util::get_default_port(reqvec[0]->uri.c_str(), reqvec[0]->u)) {
+        util::get_default_port(reqvec[0]->uri.c_str(), reqvec[0]->u)) {
     ss << ":" << reqvec[0]->u.port;
   }
   hostport = ss.str();
@@ -1464,8 +1470,8 @@ bool HttpClient::add_request(const std::string &uri,
     path_cache.insert(uri);
   }
 
-  reqvec.push_back(std::make_unique<Request>(uri, u, data_prd, data_length,
-                                             pri_spec, level));
+  reqvec.push_back(
+    std::make_unique<Request>(uri, u, data_prd, data_length, pri_spec, level));
   return true;
 }
 
@@ -1510,8 +1516,8 @@ void HttpClient::output_har(FILE *outfile) {
   json_array_append_new(pages, page);
 
   json_object_set_new(
-      page, "startedDateTime",
-      json_string(util::format_iso8601(timing.system_start_time).c_str()));
+    page, "startedDateTime",
+    json_string(util::format_iso8601(timing.system_start_time).c_str()));
   json_object_set_new(page, "id", json_string(PAGE_ID));
   json_object_set_new(page, "title", json_string(""));
 
@@ -1521,14 +1527,14 @@ void HttpClient::output_har(FILE *outfile) {
   json_object_set_new(log, "entries", entries);
 
   auto dns_delta = std::chrono::duration_cast<std::chrono::microseconds>(
-                       timing.domain_lookup_end_time - timing.start_time)
-                       .count() /
+                     timing.domain_lookup_end_time - timing.start_time)
+                     .count() /
                    1000.0;
   auto connect_delta =
-      std::chrono::duration_cast<std::chrono::microseconds>(
-          timing.connect_end_time - timing.domain_lookup_end_time)
-          .count() /
-      1000.0;
+    std::chrono::duration_cast<std::chrono::microseconds>(
+      timing.connect_end_time - timing.domain_lookup_end_time)
+      .count() /
+    1000.0;
 
   for (size_t i = 0; i < reqvec.size(); ++i) {
     auto &req = reqvec[i];
@@ -1542,34 +1548,34 @@ void HttpClient::output_har(FILE *outfile) {
 
     auto &req_timing = req->timing;
     auto request_time =
-        (i == 0) ? timing.system_start_time
-                 : timing.system_start_time +
-                       std::chrono::duration_cast<
-                           std::chrono::system_clock::duration>(
-                           req_timing.request_start_time - timing.start_time);
+      (i == 0)
+        ? timing.system_start_time
+        : timing.system_start_time +
+            std::chrono::duration_cast<std::chrono::system_clock::duration>(
+              req_timing.request_start_time - timing.start_time);
 
     auto wait_delta =
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            req_timing.response_start_time - req_timing.request_start_time)
-            .count() /
-        1000.0;
+      std::chrono::duration_cast<std::chrono::microseconds>(
+        req_timing.response_start_time - req_timing.request_start_time)
+        .count() /
+      1000.0;
     auto receive_delta =
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            req_timing.response_end_time - req_timing.response_start_time)
-            .count() /
-        1000.0;
+      std::chrono::duration_cast<std::chrono::microseconds>(
+        req_timing.response_end_time - req_timing.response_start_time)
+        .count() /
+      1000.0;
 
     auto time_sum =
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            (i == 0) ? (req_timing.response_end_time - timing.start_time)
-                     : (req_timing.response_end_time -
-                        req_timing.request_start_time))
-            .count() /
-        1000.0;
+      std::chrono::duration_cast<std::chrono::microseconds>(
+        (i == 0)
+          ? (req_timing.response_end_time - timing.start_time)
+          : (req_timing.response_end_time - req_timing.request_start_time))
+        .count() /
+      1000.0;
 
     json_object_set_new(
-        entry, "startedDateTime",
-        json_string(util::format_iso8601(request_time).c_str()));
+      entry, "startedDateTime",
+      json_string(util::format_iso8601(request_time).c_str()));
     json_object_set_new(entry, "time", json_real(time_sum));
 
     auto pushed = req->stream_id % 2 == 0;
@@ -1688,7 +1694,7 @@ void update_html_parser(HttpClient *client, Request *req, const uint8_t *data,
     }
 
     auto link_port = util::has_uri_field(u, UF_PORT) ? u.port
-                     : scheme == "https"             ? 443
+                     : scheme == "https"_sr          ? 443
                                                      : 80;
 
     if (port != link_port) {
@@ -1718,7 +1724,7 @@ int on_data_chunk_recv_callback(nghttp2_session *session, uint8_t flags,
                                 size_t len, void *user_data) {
   auto client = get_client(user_data);
   auto req = static_cast<Request *>(
-      nghttp2_session_get_stream_user_data(session, stream_id));
+    nghttp2_session_get_stream_user_data(session, stream_id));
 
   if (!req) {
     return 0;
@@ -1738,7 +1744,7 @@ int on_data_chunk_recv_callback(nghttp2_session *session, uint8_t flags,
       size_t outlen = MAX_OUTLEN;
       size_t tlen = len;
       int rv =
-          nghttp2_gzip_inflate(req->inflater, out.data(), &outlen, data, &tlen);
+        nghttp2_gzip_inflate(req->inflater, out.data(), &outlen, data, &tlen);
       if (rv != 0) {
         nghttp2_submit_rst_stream(session, NGHTTP2_FLAG_NONE, stream_id,
                                   NGHTTP2_INTERNAL_ERROR);
@@ -1800,8 +1806,8 @@ void check_response_header(nghttp2_session *session, Request *req) {
 
   for (auto &nv : req->res_nva) {
     if ("content-encoding" == nv.name) {
-      gzip = util::strieq_l("gzip", nv.value) ||
-             util::strieq_l("deflate", nv.value);
+      gzip = util::strieq("gzip"_sr, nv.value) ||
+             util::strieq("deflate"_sr, nv.value);
       continue;
     }
   }
@@ -1842,7 +1848,7 @@ int on_begin_headers_callback(nghttp2_session *session,
   switch (frame->hd.type) {
   case NGHTTP2_HEADERS: {
     auto req = static_cast<Request *>(
-        nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
+      nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
     if (!req) {
       break;
     }
@@ -1895,7 +1901,7 @@ int on_header_callback(nghttp2_session *session, const nghttp2_frame *frame,
   switch (frame->hd.type) {
   case NGHTTP2_HEADERS: {
     auto req = static_cast<Request *>(
-        nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
+      nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
 
     if (!req) {
       break;
@@ -1915,16 +1921,18 @@ int on_header_callback(nghttp2_session *session, const nghttp2_frame *frame,
 
     req->header_buffer_size += namelen + valuelen;
 
-    auto token = http2::lookup_token(name, namelen);
+    auto nameref = StringRef{name, namelen};
+    auto valueref = StringRef{value, valuelen};
+    auto token = http2::lookup_token(nameref);
 
     http2::index_header(req->res_hdidx, token, req->res_nva.size());
-    http2::add_header(req->res_nva, name, namelen, value, valuelen,
+    http2::add_header(req->res_nva, nameref, valueref,
                       flags & NGHTTP2_NV_FLAG_NO_INDEX, token);
     break;
   }
   case NGHTTP2_PUSH_PROMISE: {
     auto req = static_cast<Request *>(nghttp2_session_get_stream_user_data(
-        session, frame->push_promise.promised_stream_id));
+      session, frame->push_promise.promised_stream_id));
 
     if (!req) {
       break;
@@ -1939,10 +1947,12 @@ int on_header_callback(nghttp2_session *session, const nghttp2_frame *frame,
 
     req->header_buffer_size += namelen + valuelen;
 
-    auto token = http2::lookup_token(name, namelen);
+    auto nameref = StringRef{name, namelen};
+    auto valueref = StringRef{value, valuelen};
+    auto token = http2::lookup_token(nameref);
 
     http2::index_header(req->req_hdidx, token, req->req_nva.size());
-    http2::add_header(req->req_nva, name, namelen, value, valuelen,
+    http2::add_header(req->req_nva, nameref, valueref,
                       flags & NGHTTP2_NV_FLAG_NO_INDEX, token);
     break;
   }
@@ -1964,7 +1974,7 @@ int on_frame_recv_callback2(nghttp2_session *session,
   switch (frame->hd.type) {
   case NGHTTP2_DATA: {
     auto req = static_cast<Request *>(
-        nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
+      nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
     if (!req) {
       return 0;
       ;
@@ -1979,7 +1989,7 @@ int on_frame_recv_callback2(nghttp2_session *session,
   }
   case NGHTTP2_HEADERS: {
     auto req = static_cast<Request *>(
-        nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
+      nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
     // If this is the HTTP Upgrade with OPTIONS method to avoid POST,
     // req is nullptr.
     if (!req) {
@@ -2022,7 +2032,7 @@ int on_frame_recv_callback2(nghttp2_session *session,
     break;
   case NGHTTP2_PUSH_PROMISE: {
     auto req = static_cast<Request *>(nghttp2_session_get_stream_user_data(
-        session, frame->push_promise.promised_stream_id));
+      session, frame->push_promise.promised_stream_id));
     if (!req) {
       break;
     }
@@ -2086,7 +2096,7 @@ int before_frame_send_callback(nghttp2_session *session,
     return 0;
   }
   auto req = static_cast<Request *>(
-      nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
+    nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
   assert(req);
   req->record_request_start_time();
   return 0;
@@ -2107,7 +2117,7 @@ int on_frame_send_callback(nghttp2_session *session, const nghttp2_frame *frame,
   }
 
   auto req = static_cast<Request *>(
-      nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
+    nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
   if (!req) {
     return 0;
   }
@@ -2131,7 +2141,7 @@ int on_frame_not_send_callback(nghttp2_session *session,
   }
 
   auto req = static_cast<Request *>(
-      nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
+    nghttp2_session_get_stream_user_data(session, frame->hd.stream_id));
   if (!req) {
     return 0;
   }
@@ -2148,7 +2158,7 @@ int on_stream_close_callback(nghttp2_session *session, int32_t stream_id,
                              uint32_t error_code, void *user_data) {
   auto client = get_client(user_data);
   auto req = static_cast<Request *>(
-      nghttp2_session_get_stream_user_data(session, stream_id));
+    nghttp2_session_get_stream_user_data(session, stream_id));
 
   if (!req) {
     return 0;
@@ -2218,11 +2228,11 @@ id  responseEnd requestStart  process code size request path)"
   const auto &base = client.timing.connect_end_time;
   for (const auto &req : reqs) {
     auto response_end = std::chrono::duration_cast<std::chrono::microseconds>(
-        req->timing.response_end_time - base);
+      req->timing.response_end_time - base);
     auto request_start = std::chrono::duration_cast<std::chrono::microseconds>(
-        req->timing.request_start_time - base);
+      req->timing.request_start_time - base);
     auto total = std::chrono::duration_cast<std::chrono::microseconds>(
-        req->timing.response_end_time - req->timing.request_start_time);
+      req->timing.response_end_time - req->timing.request_start_time);
     auto pushed = req->stream_id % 2 == 0;
 
     std::cout << std::setw(3) << req->stream_id << " " << std::setw(11)
@@ -2239,11 +2249,11 @@ id  responseEnd requestStart  process code size request path)"
 
 namespace {
 int communicate(
-    const std::string &scheme, const std::string &host, uint16_t port,
-    std::vector<
-        std::tuple<std::string, nghttp2_data_provider2 *, int64_t, int32_t>>
-        requests,
-    const nghttp2_session_callbacks *callbacks) {
+  const std::string &scheme, const std::string &host, uint16_t port,
+  std::vector<
+    std::tuple<std::string, nghttp2_data_provider2 *, int64_t, int32_t>>
+    requests,
+  const nghttp2_session_callbacks *callbacks) {
   int result = 0;
   auto loop = EV_DEFAULT;
   SSL_CTX *ssl_ctx = nullptr;
@@ -2276,19 +2286,31 @@ int communicate(
     }
 
     if (nghttp2::tls::ssl_ctx_set_proto_versions(
-            ssl_ctx, nghttp2::tls::NGHTTP2_TLS_MIN_VERSION,
-            nghttp2::tls::NGHTTP2_TLS_MAX_VERSION) != 0) {
+          ssl_ctx, nghttp2::tls::NGHTTP2_TLS_MIN_VERSION,
+          nghttp2::tls::NGHTTP2_TLS_MAX_VERSION) != 0) {
       std::cerr << "[ERROR] Could not set TLS versions" << std::endl;
       result = -1;
       goto fin;
     }
 
-    if (SSL_CTX_set_cipher_list(ssl_ctx, tls::DEFAULT_CIPHER_LIST) == 0) {
+    if (SSL_CTX_set_cipher_list(ssl_ctx, tls::DEFAULT_CIPHER_LIST.data()) ==
+        0) {
       std::cerr << "[ERROR] " << ERR_error_string(ERR_get_error(), nullptr)
                 << std::endl;
       result = -1;
       goto fin;
     }
+
+#ifdef NGHTTP2_OPENSSL_IS_WOLFSSL
+    if (SSL_CTX_set_ciphersuites(ssl_ctx,
+                                 tls::DEFAULT_TLS13_CIPHER_LIST.data()) == 0) {
+      std::cerr << "[ERROR] " << ERR_error_string(ERR_get_error(), nullptr)
+                << std::endl;
+      result = -1;
+      goto fin;
+    }
+#endif // NGHTTP2_OPENSSL_IS_WOLFSSL
+
     if (!config.keyfile.empty()) {
       if (SSL_CTX_use_PrivateKey_file(ssl_ctx, config.keyfile.c_str(),
                                       SSL_FILETYPE_PEM) != 1) {
@@ -2314,8 +2336,8 @@ int communicate(
 
 #if defined(NGHTTP2_OPENSSL_IS_BORINGSSL) && defined(HAVE_LIBBROTLI)
     if (!SSL_CTX_add_cert_compression_alg(
-            ssl_ctx, nghttp2::tls::CERTIFICATE_COMPRESSION_ALGO_BROTLI,
-            nghttp2::tls::cert_compress, nghttp2::tls::cert_decompress)) {
+          ssl_ctx, nghttp2::tls::CERTIFICATE_COMPRESSION_ALGO_BROTLI,
+          nghttp2::tls::cert_compress, nghttp2::tls::cert_decompress)) {
       std::cerr << "[ERROR] SSL_CTX_add_cert_compression_alg failed."
                 << std::endl;
       result = -1;
@@ -2416,7 +2438,7 @@ nghttp2_ssize file_read_callback(nghttp2_session *session, int32_t stream_id,
                                  nghttp2_data_source *source, void *user_data) {
   int rv;
   auto req = static_cast<Request *>(
-      nghttp2_session_get_stream_user_data(session, stream_id));
+    nghttp2_session_get_stream_user_data(session, stream_id));
   assert(req);
   int fd = source->fd;
   ssize_t nread;
@@ -2437,7 +2459,8 @@ nghttp2_ssize file_read_callback(nghttp2_session *session, int32_t stream_id,
       std::vector<nghttp2_nv> nva;
       nva.reserve(config.trailer.size());
       for (auto &kv : config.trailer) {
-        nva.push_back(http2::make_nv(kv.name, kv.value, kv.no_index));
+        nva.push_back(http2::make_field_nv(kv.name, kv.value,
+                                           http2::no_index(kv.no_index)));
       }
       rv = nghttp2_submit_trailer(session, stream_id, nva.data(), nva.size());
       if (rv != 0) {
@@ -2468,40 +2491,40 @@ int run(char **uris, int n) {
   auto cbsdel = defer(nghttp2_session_callbacks_del, callbacks);
 
   nghttp2_session_callbacks_set_on_stream_close_callback(
-      callbacks, on_stream_close_callback);
+    callbacks, on_stream_close_callback);
 
   nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks,
                                                        on_frame_recv_callback2);
 
   if (config.verbose) {
     nghttp2_session_callbacks_set_on_invalid_frame_recv_callback(
-        callbacks, verbose_on_invalid_frame_recv_callback);
+      callbacks, verbose_on_invalid_frame_recv_callback);
 
     nghttp2_session_callbacks_set_error_callback2(callbacks,
                                                   verbose_error_callback);
   }
 
   nghttp2_session_callbacks_set_on_data_chunk_recv_callback(
-      callbacks, on_data_chunk_recv_callback);
+    callbacks, on_data_chunk_recv_callback);
 
   nghttp2_session_callbacks_set_on_begin_headers_callback(
-      callbacks, on_begin_headers_callback);
+    callbacks, on_begin_headers_callback);
 
   nghttp2_session_callbacks_set_on_header_callback(callbacks,
                                                    on_header_callback);
 
   nghttp2_session_callbacks_set_before_frame_send_callback(
-      callbacks, before_frame_send_callback);
+    callbacks, before_frame_send_callback);
 
   nghttp2_session_callbacks_set_on_frame_send_callback(callbacks,
                                                        on_frame_send_callback);
 
   nghttp2_session_callbacks_set_on_frame_not_send_callback(
-      callbacks, on_frame_not_send_callback);
+    callbacks, on_frame_not_send_callback);
 
   if (config.padding) {
     nghttp2_session_callbacks_set_select_padding_callback2(
-        callbacks, select_padding_callback);
+      callbacks, select_padding_callback);
   }
 
   std::string prev_scheme;
@@ -2577,8 +2600,8 @@ int run(char **uris, int n) {
     data_prd.read_callback = file_read_callback;
   }
   std::vector<
-      std::tuple<std::string, nghttp2_data_provider2 *, int64_t, int32_t>>
-      requests;
+    std::tuple<std::string, nghttp2_data_provider2 *, int64_t, int32_t>>
+    requests;
 
   size_t next_weight_idx = 0;
 
@@ -2597,8 +2620,8 @@ int run(char **uris, int n) {
       continue;
     }
     auto port = util::has_uri_field(u, UF_PORT)
-                    ? u.port
-                    : util::get_default_port(uri.c_str(), u);
+                  ? u.port
+                  : util::get_default_port(uri.c_str(), u);
     auto host = decode_host(util::get_uri_field(uri.c_str(), u, UF_HOST));
     if (!util::fieldeq(uri.c_str(), u, UF_SCHEMA, prev_scheme.c_str()) ||
         host != prev_host || port != prev_port) {
@@ -2609,7 +2632,7 @@ int run(char **uris, int n) {
         }
         requests.clear();
       }
-      prev_scheme = util::get_uri_field(uri.c_str(), u, UF_SCHEMA).str();
+      prev_scheme = util::get_uri_field(uri.c_str(), u, UF_SCHEMA);
       prev_host = std::move(host);
       prev_port = port;
     }
@@ -2772,45 +2795,45 @@ int main(int argc, char **argv) {
   while (1) {
     static int flag = 0;
     constexpr static option long_options[] = {
-        {"verbose", no_argument, nullptr, 'v'},
-        {"null-out", no_argument, nullptr, 'n'},
-        {"remote-name", no_argument, nullptr, 'O'},
-        {"timeout", required_argument, nullptr, 't'},
-        {"window-bits", required_argument, nullptr, 'w'},
-        {"connection-window-bits", required_argument, nullptr, 'W'},
-        {"get-assets", no_argument, nullptr, 'a'},
-        {"stat", no_argument, nullptr, 's'},
-        {"help", no_argument, nullptr, 'h'},
-        {"header", required_argument, nullptr, 'H'},
-        {"data", required_argument, nullptr, 'd'},
-        {"multiply", required_argument, nullptr, 'm'},
-        {"upgrade", no_argument, nullptr, 'u'},
-        {"weight", required_argument, nullptr, 'p'},
-        {"peer-max-concurrent-streams", required_argument, nullptr, 'M'},
-        {"header-table-size", required_argument, nullptr, 'c'},
-        {"padding", required_argument, nullptr, 'b'},
-        {"har", required_argument, nullptr, 'r'},
-        {"no-verify-peer", no_argument, nullptr, 'y'},
-        {"cert", required_argument, &flag, 1},
-        {"key", required_argument, &flag, 2},
-        {"color", no_argument, &flag, 3},
-        {"continuation", no_argument, &flag, 4},
-        {"version", no_argument, &flag, 5},
-        {"no-content-length", no_argument, &flag, 6},
-        {"no-dep", no_argument, &flag, 7},
-        {"trailer", required_argument, &flag, 9},
-        {"hexdump", no_argument, &flag, 10},
-        {"no-push", no_argument, &flag, 11},
-        {"max-concurrent-streams", required_argument, &flag, 12},
-        {"expect-continue", no_argument, &flag, 13},
-        {"encoder-header-table-size", required_argument, &flag, 14},
-        {"ktls", no_argument, &flag, 15},
-        {"no-rfc7540-pri", no_argument, &flag, 16},
-        {nullptr, 0, nullptr, 0}};
+      {"verbose", no_argument, nullptr, 'v'},
+      {"null-out", no_argument, nullptr, 'n'},
+      {"remote-name", no_argument, nullptr, 'O'},
+      {"timeout", required_argument, nullptr, 't'},
+      {"window-bits", required_argument, nullptr, 'w'},
+      {"connection-window-bits", required_argument, nullptr, 'W'},
+      {"get-assets", no_argument, nullptr, 'a'},
+      {"stat", no_argument, nullptr, 's'},
+      {"help", no_argument, nullptr, 'h'},
+      {"header", required_argument, nullptr, 'H'},
+      {"data", required_argument, nullptr, 'd'},
+      {"multiply", required_argument, nullptr, 'm'},
+      {"upgrade", no_argument, nullptr, 'u'},
+      {"weight", required_argument, nullptr, 'p'},
+      {"peer-max-concurrent-streams", required_argument, nullptr, 'M'},
+      {"header-table-size", required_argument, nullptr, 'c'},
+      {"padding", required_argument, nullptr, 'b'},
+      {"har", required_argument, nullptr, 'r'},
+      {"no-verify-peer", no_argument, nullptr, 'y'},
+      {"cert", required_argument, &flag, 1},
+      {"key", required_argument, &flag, 2},
+      {"color", no_argument, &flag, 3},
+      {"continuation", no_argument, &flag, 4},
+      {"version", no_argument, &flag, 5},
+      {"no-content-length", no_argument, &flag, 6},
+      {"no-dep", no_argument, &flag, 7},
+      {"trailer", required_argument, &flag, 9},
+      {"hexdump", no_argument, &flag, 10},
+      {"no-push", no_argument, &flag, 11},
+      {"max-concurrent-streams", required_argument, &flag, 12},
+      {"expect-continue", no_argument, &flag, 13},
+      {"encoder-header-table-size", required_argument, &flag, 14},
+      {"ktls", no_argument, &flag, 15},
+      {"no-rfc7540-pri", no_argument, &flag, 16},
+      {nullptr, 0, nullptr, 0}};
     int option_index = 0;
     int c =
-        getopt_long(argc, argv, "M:Oab:c:d:m:np:r:hH:vst:uw:yW:", long_options,
-                    &option_index);
+      getopt_long(argc, argv, "M:Oab:c:d:m:np:r:hH:vst:uw:yW:", long_options,
+                  &option_index);
     if (c == -1) {
       break;
     }
@@ -2818,11 +2841,11 @@ int main(int argc, char **argv) {
     case 'M': {
       // peer-max-concurrent-streams option
       auto n = util::parse_uint(optarg);
-      if (n == -1) {
+      if (!n) {
         std::cerr << "-M: Bad option value: " << optarg << std::endl;
         exit(EXIT_FAILURE);
       }
-      config.peer_max_concurrent_streams = n;
+      config.peer_max_concurrent_streams = *n;
       break;
     }
     case 'O':
@@ -2833,11 +2856,11 @@ int main(int argc, char **argv) {
       exit(EXIT_SUCCESS);
     case 'b': {
       auto n = util::parse_uint(optarg);
-      if (n == -1) {
+      if (!n) {
         std::cerr << "-b: Bad option value: " << optarg << std::endl;
         exit(EXIT_FAILURE);
       }
-      config.padding = n;
+      config.padding = *n;
       break;
     }
     case 'n':
@@ -2845,13 +2868,13 @@ int main(int argc, char **argv) {
       break;
     case 'p': {
       auto n = util::parse_uint(optarg);
-      if (n == -1 || NGHTTP2_MIN_WEIGHT > n || n > NGHTTP2_MAX_WEIGHT) {
+      if (!n || NGHTTP2_MIN_WEIGHT > n || n > NGHTTP2_MAX_WEIGHT) {
         std::cerr << "-p: specify the integer in the range ["
                   << NGHTTP2_MIN_WEIGHT << ", " << NGHTTP2_MAX_WEIGHT
                   << "], inclusive" << std::endl;
         exit(EXIT_FAILURE);
       }
-      config.weight.push_back(n);
+      config.weight.push_back(*n);
       break;
     }
     case 'r':
@@ -2865,29 +2888,31 @@ int main(int argc, char **argv) {
     case 'v':
       ++config.verbose;
       break;
-    case 't':
-      config.timeout = util::parse_duration_with_unit(optarg);
-      if (config.timeout == std::numeric_limits<double>::infinity()) {
+    case 't': {
+      auto d = util::parse_duration_with_unit(optarg);
+      if (!d) {
         std::cerr << "-t: bad timeout value: " << optarg << std::endl;
         exit(EXIT_FAILURE);
       }
+      config.timeout = *d;
       break;
+    }
     case 'u':
       config.upgrade = true;
       break;
     case 'w':
     case 'W': {
       auto n = util::parse_uint(optarg);
-      if (n == -1 || n > 30) {
+      if (!n || n > 30) {
         std::cerr << "-" << static_cast<char>(c)
                   << ": specify the integer in the range [0, 30], inclusive"
                   << std::endl;
         exit(EXIT_FAILURE);
       }
       if (c == 'w') {
-        config.window_bits = n;
+        config.window_bits = *n;
       } else {
-        config.connection_window_bits = n;
+        config.connection_window_bits = *n;
       }
       break;
     }
@@ -2931,16 +2956,16 @@ int main(int argc, char **argv) {
       break;
     case 'm': {
       auto n = util::parse_uint(optarg);
-      if (n == -1) {
+      if (!n) {
         std::cerr << "-m: Bad option value: " << optarg << std::endl;
         exit(EXIT_FAILURE);
       }
-      config.multiply = n;
+      config.multiply = *n;
       break;
     }
     case 'c': {
       auto n = util::parse_uint_with_unit(optarg);
-      if (n == -1) {
+      if (!n) {
         std::cerr << "-c: Bad option value: " << optarg << std::endl;
         exit(EXIT_FAILURE);
       }
@@ -2949,8 +2974,8 @@ int main(int argc, char **argv) {
                   << std::numeric_limits<uint32_t>::max() << std::endl;
         exit(EXIT_FAILURE);
       }
-      config.header_table_size = n;
-      config.min_header_table_size = std::min(config.min_header_table_size, n);
+      config.header_table_size = *n;
+      config.min_header_table_size = std::min(config.min_header_table_size, *n);
       break;
     }
     case 'y':
@@ -3024,12 +3049,12 @@ int main(int argc, char **argv) {
       case 12: {
         // max-concurrent-streams option
         auto n = util::parse_uint(optarg);
-        if (n == -1) {
+        if (!n) {
           std::cerr << "--max-concurrent-streams: Bad option value: " << optarg
                     << std::endl;
           exit(EXIT_FAILURE);
         }
-        config.max_concurrent_streams = n;
+        config.max_concurrent_streams = *n;
         break;
       }
       case 13:
@@ -3039,7 +3064,7 @@ int main(int argc, char **argv) {
       case 14: {
         // encoder-header-table-size option
         auto n = util::parse_uint_with_unit(optarg);
-        if (n == -1) {
+        if (!n) {
           std::cerr << "--encoder-header-table-size: Bad option value: "
                     << optarg << std::endl;
           exit(EXIT_FAILURE);
@@ -3050,7 +3075,7 @@ int main(int argc, char **argv) {
                     << std::numeric_limits<uint32_t>::max() << std::endl;
           exit(EXIT_FAILURE);
         }
-        config.encoder_header_table_size = n;
+        config.encoder_header_table_size = *n;
         break;
       }
       case 15:
@@ -3078,20 +3103,20 @@ int main(int argc, char **argv) {
 
   // Find scheme overridden by extra header fields.
   auto scheme_it =
-      std::find_if(std::begin(config.headers), std::end(config.headers),
-                   [](const Header &nv) { return nv.name == ":scheme"; });
+    std::find_if(std::begin(config.headers), std::end(config.headers),
+                 [](const Header &nv) { return nv.name == ":scheme"; });
   if (scheme_it != std::end(config.headers)) {
     config.scheme_override = (*scheme_it).value;
   }
 
   // Find host and port overridden by extra header fields.
   auto authority_it =
-      std::find_if(std::begin(config.headers), std::end(config.headers),
-                   [](const Header &nv) { return nv.name == ":authority"; });
+    std::find_if(std::begin(config.headers), std::end(config.headers),
+                 [](const Header &nv) { return nv.name == ":authority"; });
   if (authority_it == std::end(config.headers)) {
     authority_it =
-        std::find_if(std::begin(config.headers), std::end(config.headers),
-                     [](const Header &nv) { return nv.name == "host"; });
+      std::find_if(std::begin(config.headers), std::end(config.headers),
+                   [](const Header &nv) { return nv.name == "host"; });
   }
 
   if (authority_it != std::end(config.headers)) {
@@ -3105,7 +3130,7 @@ int main(int argc, char **argv) {
       exit(EXIT_FAILURE);
     }
 
-    config.host_override = util::get_uri_field(uri.c_str(), u, UF_HOST).str();
+    config.host_override = util::get_uri_field(uri.c_str(), u, UF_HOST);
     if (util::has_uri_field(u, UF_PORT)) {
       config.port_override = u.port;
     }
@@ -3114,11 +3139,11 @@ int main(int argc, char **argv) {
   set_color_output(color || isatty(fileno(stdout)));
 
   nghttp2_option_set_peer_max_concurrent_streams(
-      config.http2_option, config.peer_max_concurrent_streams);
+    config.http2_option, config.peer_max_concurrent_streams);
 
   if (config.encoder_header_table_size != -1) {
     nghttp2_option_set_max_deflate_dynamic_table_size(
-        config.http2_option, config.encoder_header_table_size);
+      config.http2_option, config.encoder_header_table_size);
   }
 
   struct sigaction act {};

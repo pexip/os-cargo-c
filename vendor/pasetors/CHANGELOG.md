@@ -1,3 +1,23 @@
+### 0.7.2
+
+__Date:__ January 27, 2025.
+
+- Bump `getrandom` to `0.3.0`.
+
+### 0.7.1
+
+__Date:__ December 10, 2024.
+
+- Add `serde` `Serialize` and `Deserialize` to `TrustedToken`, `UntrustedToken` and `Claims` ([#150](https://github.com/brycx/pasetors/issues/150), credits: [@tomtom5152](https://github.com/tomtom5152)).
+
+### 0.7.0
+
+__Date:__ August 28, 2024.
+
+- Bump MSRV to `1.80`.
+- Updated test vectors for `v3.public`.
+- (_BREAKING_) Improved error-handling during claims validation. Added `Error::ClaimValidation(ClaimValidationError)`, where `ClaimValidationError` now further specifies the validation error ([#131](https://github.com/brycx/pasetors/pull/131), credits: @jpramosi).
+
 ### 0.6.8
 
 __Date:__ December 12, 2023.
@@ -89,8 +109,8 @@ __Changelog:__
 - Stricter permissions for GH Actions workflows ([#43](https://github.com/brycx/pasetors/pull/43))
 - Add `Generate` trait and implement this for all key-types, removing also `SymmetricKey::gen()` ([#45](https://github.com/brycx/pasetors/issues/45))
 - Switch from `ed25519-dalek` to `ed25519-compact` ([#48](https://github.com/brycx/pasetors/issues/48))
-- Add new types `token::UntrustedToken` and `token::TrustedToken` which are now used by `verify()`/`decrypt()` operations. 
-These allow extracting parts of tokens before and after verification ([#47](https://github.com/brycx/pasetors/issues/47)) 
+- Add new types `token::UntrustedToken` and `token::TrustedToken` which are now used by `verify()`/`decrypt()` operations.
+These allow extracting parts of tokens before and after verification ([#47](https://github.com/brycx/pasetors/issues/47))
 - Version structs previously available in `keys::` have been moved to a new `version::` module
 - Add `Footer` type that makes it easier to create JSON-encoded footers ([#52](https://github.com/brycx/pasetors/pull/52))
 - PASERK deserialization of keys now takes `&str` instead of `String` ([#53](https://github.com/brycx/pasetors/issues/53))
@@ -144,7 +164,7 @@ __Changelog:__
 - Update Orion to `0.16`
 
 
-### 0.1.1 
+### 0.1.1
 
 __Date:__ March 21, 2021.
 

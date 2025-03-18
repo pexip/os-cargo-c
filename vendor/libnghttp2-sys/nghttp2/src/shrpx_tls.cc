@@ -42,19 +42,29 @@
 
 #include "ssl_compat.h"
 
-#include <openssl/crypto.h>
-#include <openssl/x509.h>
-#include <openssl/x509v3.h>
-#include <openssl/rand.h>
-#include <openssl/dh.h>
-#ifndef OPENSSL_NO_OCSP
-#  include <openssl/ocsp.h>
-#endif // OPENSSL_NO_OCSP
-#if OPENSSL_3_0_0_API
-#  include <openssl/params.h>
-#  include <openssl/core_names.h>
-#  include <openssl/decoder.h>
-#endif // OPENSSL_3_0_0_API
+#ifdef NGHTTP2_OPENSSL_IS_WOLFSSL
+#  include <wolfssl/options.h>
+#  include <wolfssl/openssl/crypto.h>
+#  include <wolfssl/openssl/x509.h>
+#  include <wolfssl/openssl/x509v3.h>
+#  include <wolfssl/openssl/rand.h>
+#  include <wolfssl/openssl/dh.h>
+#  include <wolfssl/openssl/ocsp.h>
+#else // !NGHTTP2_OPENSSL_IS_WOLFSSL
+#  include <openssl/crypto.h>
+#  include <openssl/x509.h>
+#  include <openssl/x509v3.h>
+#  include <openssl/rand.h>
+#  include <openssl/dh.h>
+#  ifndef OPENSSL_NO_OCSP
+#    include <openssl/ocsp.h>
+#  endif // OPENSSL_NO_OCSP
+#  if OPENSSL_3_0_0_API
+#    include <openssl/params.h>
+#    include <openssl/core_names.h>
+#    include <openssl/decoder.h>
+#  endif // OPENSSL_3_0_0_API
+#endif   // !NGHTTP2_OPENSSL_IS_WOLFSSL
 #ifdef NGHTTP2_OPENSSL_IS_BORINGSSL
 #  include <openssl/hmac.h>
 #endif // NGHTTP2_OPENSSL_IS_BORINGSSL
@@ -70,6 +80,9 @@
 #  ifdef HAVE_LIBNGTCP2_CRYPTO_BORINGSSL
 #    include <ngtcp2/ngtcp2_crypto_boringssl.h>
 #  endif // HAVE_LIBNGTCP2_CRYPTO_BORINGSSL
+#  ifdef HAVE_LIBNGTCP2_CRYPTO_WOLFSSL
+#    include <ngtcp2/ngtcp2_crypto_wolfssl.h>
+#  endif // HAVE_LIBNGTCP2_CRYPTO_WOLFSSL
 #endif   // ENABLE_HTTP3
 
 #ifdef HAVE_LIBBROTLI
@@ -157,7 +170,7 @@ int ssl_pem_passwd_cb(char *buf, int size, int rwflag, void *user_data) {
     return 0;
   }
   // Copy string including last '\0'.
-  memcpy(buf, config->tls.private_key_passwd.c_str(), len + 1);
+  memcpy(buf, config->tls.private_key_passwd.data(), len + 1);
   return len;
 }
 } // namespace
@@ -166,8 +179,7 @@ namespace {
 std::shared_ptr<std::vector<uint8_t>>
 get_ocsp_data(TLSContextData *tls_ctx_data) {
 #ifdef HAVE_ATOMIC_STD_SHARED_PTR
-  return std::atomic_load_explicit(&tls_ctx_data->ocsp_data,
-                                   std::memory_order_acquire);
+  return tls_ctx_data->ocsp_data.load(std::memory_order_acquire);
 #else  // !HAVE_ATOMIC_STD_SHARED_PTR
   std::lock_guard<std::mutex> g(tls_ctx_data->mu);
   return tls_ctx_data->ocsp_data;
@@ -179,7 +191,7 @@ namespace {
 void set_ocsp_response(SSL *ssl) {
 #ifdef NGHTTP2_OPENSSL_IS_BORINGSSL
   auto tls_ctx_data =
-      static_cast<TLSContextData *>(SSL_CTX_get_app_data(SSL_get_SSL_CTX(ssl)));
+    static_cast<TLSContextData *>(SSL_CTX_get_app_data(SSL_get_SSL_CTX(ssl)));
   auto data = get_ocsp_data(tls_ctx_data);
 
   if (!data) {
@@ -214,7 +226,7 @@ int servername_callback(SSL *ssl, int *al, void *arg) {
     return SSL_TLSEXT_ERR_NOACK;
   }
 
-  std::array<uint8_t, NI_MAXHOST> buf;
+  std::array<char, NI_MAXHOST> buf;
 
   auto end_buf = std::copy_n(rawhost, len, std::begin(buf));
 
@@ -224,8 +236,8 @@ int servername_callback(SSL *ssl, int *al, void *arg) {
 
 #ifdef ENABLE_HTTP3
   auto cert_tree = conn->proto == Proto::HTTP3
-                       ? worker->get_quic_cert_lookup_tree()
-                       : worker->get_cert_lookup_tree();
+                     ? worker->get_quic_cert_lookup_tree()
+                     : worker->get_cert_lookup_tree();
 #else  // !ENABLE_HTTP3
   auto cert_tree = worker->get_cert_lookup_tree();
 #endif // !ENABLE_HTTP3
@@ -243,8 +255,8 @@ int servername_callback(SSL *ssl, int *al, void *arg) {
 
 #ifdef ENABLE_HTTP3
   const auto &ssl_ctx_list = conn->proto == Proto::HTTP3
-                                 ? conn_handler->get_quic_indexed_ssl_ctx(idx)
-                                 : conn_handler->get_indexed_ssl_ctx(idx);
+                               ? conn_handler->get_quic_indexed_ssl_ctx(idx)
+                               : conn_handler->get_indexed_ssl_ctx(idx);
 #else  // !ENABLE_HTTP3
   const auto &ssl_ctx_list = conn_handler->get_indexed_ssl_ctx(idx);
 #endif // !ENABLE_HTTP3
@@ -253,7 +265,7 @@ int servername_callback(SSL *ssl, int *al, void *arg) {
 
 #ifdef NGHTTP2_GENUINE_OPENSSL
   auto num_sigalgs =
-      SSL_get_sigalgs(ssl, 0, nullptr, nullptr, nullptr, nullptr, nullptr);
+    SSL_get_sigalgs(ssl, 0, nullptr, nullptr, nullptr, nullptr, nullptr);
 
   for (idx = 0; idx < num_sigalgs; ++idx) {
     int signhash;
@@ -341,7 +353,7 @@ namespace {
 int ocsp_resp_cb(SSL *ssl, void *arg) {
   auto ssl_ctx = SSL_get_SSL_CTX(ssl);
   auto tls_ctx_data =
-      static_cast<TLSContextData *>(SSL_CTX_get_app_data(ssl_ctx));
+    static_cast<TLSContextData *>(SSL_CTX_get_app_data(ssl_ctx));
 
   auto data = get_ocsp_data(tls_ctx_data);
 
@@ -350,7 +362,7 @@ int ocsp_resp_cb(SSL *ssl, void *arg) {
   }
 
   auto buf = static_cast<uint8_t *>(
-      CRYPTO_malloc(data->size(), NGHTTP2_FILE_NAME, __LINE__));
+    CRYPTO_malloc(data->size(), NGHTTP2_FILE_NAME, __LINE__));
 
   if (!buf) {
     return SSL_TLSEXT_ERR_OK;
@@ -366,7 +378,7 @@ int ocsp_resp_cb(SSL *ssl, void *arg) {
 #endif // NGHTTP2_OPENSSL_IS_BORINGSSL
 
 constexpr auto MEMCACHED_SESSION_CACHE_KEY_PREFIX =
-    StringRef::from_lit("nghttpx:tls-session-cache:");
+  "nghttpx:tls-session-cache:"_sr;
 
 namespace {
 int tls_session_client_new_cb(SSL *ssl, SSL_SESSION *session) {
@@ -402,14 +414,15 @@ int tls_session_new_cb(SSL *ssl, SSL_SESSION *session) {
   id = SSL_SESSION_get_id(session, &idlen);
 
   if (LOG_ENABLED(INFO)) {
-    LOG(INFO) << "Memcached: cache session, id=" << util::format_hex(id, idlen);
+    LOG(INFO) << "Memcached: cache session, id="
+              << util::format_hex(std::span{id, idlen});
   }
 
   auto req = std::make_unique<MemcachedRequest>();
   req->op = MemcachedOp::ADD;
-  req->key = MEMCACHED_SESSION_CACHE_KEY_PREFIX.str();
+  req->key = MEMCACHED_SESSION_CACHE_KEY_PREFIX;
   req->key +=
-      util::format_hex(balloc, StringRef{id, static_cast<size_t>(idlen)});
+    util::format_hex(balloc, std::span{id, static_cast<size_t>(idlen)});
 
   auto sessionlen = i2d_SSL_SESSION(session, nullptr);
   req->value.resize(sessionlen);
@@ -454,7 +467,7 @@ SSL_SESSION *tls_session_get_cb(SSL *ssl, const unsigned char *id, int idlen,
   if (conn->tls.cached_session) {
     if (LOG_ENABLED(INFO)) {
       LOG(INFO) << "Memcached: found cached session, id="
-                << util::format_hex(id, idlen);
+                << util::format_hex(std::span{id, static_cast<size_t>(idlen)});
     }
 
     // This is required, without this, memory leak occurs.
@@ -467,14 +480,14 @@ SSL_SESSION *tls_session_get_cb(SSL *ssl, const unsigned char *id, int idlen,
 
   if (LOG_ENABLED(INFO)) {
     LOG(INFO) << "Memcached: get cached session, id="
-              << util::format_hex(id, idlen);
+              << util::format_hex(std::span{id, static_cast<size_t>(idlen)});
   }
 
   auto req = std::make_unique<MemcachedRequest>();
   req->op = MemcachedOp::GET;
-  req->key = MEMCACHED_SESSION_CACHE_KEY_PREFIX.str();
+  req->key = MEMCACHED_SESSION_CACHE_KEY_PREFIX;
   req->key +=
-      util::format_hex(balloc, StringRef{id, static_cast<size_t>(idlen)});
+    util::format_hex(balloc, std::span{id, static_cast<size_t>(idlen)});
   req->cb = [conn](MemcachedRequest *, MemcachedResult res) {
     if (LOG_ENABLED(INFO)) {
       LOG(INFO) << "Memcached: returned status code "
@@ -560,14 +573,14 @@ int ticket_key_cb(SSL *ssl, unsigned char *key_name, unsigned char *iv,
     EVP_EncryptInit_ex(ctx, get_config()->tls.ticket.cipher, nullptr,
                        key.data.enc_key.data(), iv);
 #if OPENSSL_3_0_0_API
-    std::array<OSSL_PARAM, 3> params{
-        OSSL_PARAM_construct_octet_string(
-            OSSL_MAC_PARAM_KEY, key.data.hmac_key.data(), key.hmac_keylen),
-        OSSL_PARAM_construct_utf8_string(
-            OSSL_MAC_PARAM_DIGEST,
-            const_cast<char *>(EVP_MD_get0_name(key.hmac)), 0),
-        OSSL_PARAM_construct_end(),
-    };
+    auto params = std::to_array({
+      OSSL_PARAM_construct_octet_string(
+        OSSL_MAC_PARAM_KEY, key.data.hmac_key.data(), key.hmac_keylen),
+      OSSL_PARAM_construct_utf8_string(
+        OSSL_MAC_PARAM_DIGEST, const_cast<char *>(EVP_MD_get0_name(key.hmac)),
+        0),
+      OSSL_PARAM_construct_end(),
+    });
     if (!EVP_MAC_CTX_set_params(hctx, params.data())) {
       if (LOG_ENABLED(INFO)) {
         CLOG(INFO, handler) << "EVP_MAC_CTX_set_params failed";
@@ -593,26 +606,26 @@ int ticket_key_cb(SSL *ssl, unsigned char *key_name, unsigned char *iv,
   if (i == keys.size()) {
     if (LOG_ENABLED(INFO)) {
       CLOG(INFO, handler) << "session ticket key "
-                          << util::format_hex(key_name, 16) << " not found";
+                          << util::format_hex(std::span{key_name, 16})
+                          << " not found";
     }
     return 0;
   }
 
   if (LOG_ENABLED(INFO)) {
     CLOG(INFO, handler) << "decrypt session ticket key: "
-                        << util::format_hex(key_name, 16);
+                        << util::format_hex(std::span{key_name, 16});
   }
 
   auto &key = keys[i];
 #if OPENSSL_3_0_0_API
-  std::array<OSSL_PARAM, 3> params{
-      OSSL_PARAM_construct_octet_string(
-          OSSL_MAC_PARAM_KEY, key.data.hmac_key.data(), key.hmac_keylen),
-      OSSL_PARAM_construct_utf8_string(
-          OSSL_MAC_PARAM_DIGEST, const_cast<char *>(EVP_MD_get0_name(key.hmac)),
-          0),
-      OSSL_PARAM_construct_end(),
-  };
+  auto params = std::to_array({
+    OSSL_PARAM_construct_octet_string(
+      OSSL_MAC_PARAM_KEY, key.data.hmac_key.data(), key.hmac_keylen),
+    OSSL_PARAM_construct_utf8_string(
+      OSSL_MAC_PARAM_DIGEST, const_cast<char *>(EVP_MD_get0_name(key.hmac)), 0),
+    OSSL_PARAM_construct_end(),
+  });
   if (!EVP_MAC_CTX_set_params(hctx, params.data())) {
     if (LOG_ENABLED(INFO)) {
       CLOG(INFO, handler) << "EVP_MAC_CTX_set_params failed";
@@ -676,8 +689,7 @@ int alpn_select_proto_cb(SSL *ssl, const unsigned char **out,
       auto proto_len = *p;
 
       if (proto_id + proto_len <= end &&
-          util::streq(target_proto_id, StringRef{proto_id, proto_len})) {
-
+          target_proto_id == StringRef{proto_id, proto_len}) {
         *out = reinterpret_cast<const unsigned char *>(proto_id);
         *outlen = proto_len;
 
@@ -698,8 +710,8 @@ int quic_alpn_select_proto_cb(SSL *ssl, const unsigned char **out,
                               unsigned char *outlen, const unsigned char *in,
                               unsigned int inlen, void *arg) {
   constexpr StringRef alpnlist[] = {
-      StringRef::from_lit("h3"),
-      StringRef::from_lit("h3-29"),
+    "h3"_sr,
+    "h3-29"_sr,
   };
 
   for (auto &alpn : alpnlist) {
@@ -748,7 +760,7 @@ int sct_add_cb(SSL *ssl, unsigned int ext_type, unsigned int context,
 
   auto ssl_ctx = SSL_get_SSL_CTX(ssl);
   auto tls_ctx_data =
-      static_cast<TLSContextData *>(SSL_CTX_get_app_data(ssl_ctx));
+    static_cast<TLSContextData *>(SSL_CTX_get_app_data(ssl_ctx));
 
   *out = tls_ctx_data->sct_data.data();
   *outlen = tls_ctx_data->sct_data.size();
@@ -929,9 +941,9 @@ struct TLSProtocol {
 };
 
 constexpr TLSProtocol TLS_PROTOS[] = {
-    TLSProtocol{StringRef::from_lit("TLSv1.2"), SSL_OP_NO_TLSv1_2},
-    TLSProtocol{StringRef::from_lit("TLSv1.1"), SSL_OP_NO_TLSv1_1},
-    TLSProtocol{StringRef::from_lit("TLSv1.0"), SSL_OP_NO_TLSv1}};
+  TLSProtocol{"TLSv1.2"_sr, SSL_OP_NO_TLSv1_2},
+  TLSProtocol{"TLSv1.1"_sr, SSL_OP_NO_TLSv1_1},
+  TLSProtocol{"TLSv1.0"_sr, SSL_OP_NO_TLSv1}};
 
 long int create_tls_proto_mask(const std::vector<StringRef> &tls_proto_list) {
   long int res = 0;
@@ -978,7 +990,7 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
                   // is still performed.
                   | SSL_OP_NO_ANTI_REPLAY
 #endif // NGHTTP2_GENUINE_OPENSSL
-      ;
+    ;
 
   auto config = mod_config();
   auto &tlsconf = config->tls;
@@ -992,7 +1004,7 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
   SSL_CTX_set_options(ssl_ctx, ssl_opts | tlsconf.tls_proto_mask);
 
   if (nghttp2::tls::ssl_ctx_set_proto_versions(
-          ssl_ctx, tlsconf.min_proto_version, tlsconf.max_proto_version) != 0) {
+        ssl_ctx, tlsconf.min_proto_version, tlsconf.max_proto_version) != 0) {
     LOG(FATAL) << "Could not set TLS protocol version";
     DIE();
   }
@@ -1008,22 +1020,24 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
 
   SSL_CTX_set_timeout(ssl_ctx, tlsconf.session_timeout.count());
 
-  if (SSL_CTX_set_cipher_list(ssl_ctx, tlsconf.ciphers.c_str()) == 0) {
+  if (SSL_CTX_set_cipher_list(ssl_ctx, tlsconf.ciphers.data()) == 0) {
     LOG(FATAL) << "SSL_CTX_set_cipher_list " << tlsconf.ciphers
                << " failed: " << ERR_error_string(ERR_get_error(), nullptr);
     DIE();
   }
 
-#if defined(NGHTTP2_GENUINE_OPENSSL) || defined(NGHTTP2_OPENSSL_IS_LIBRESSL)
-  if (SSL_CTX_set_ciphersuites(ssl_ctx, tlsconf.tls13_ciphers.c_str()) == 0) {
+#if defined(NGHTTP2_GENUINE_OPENSSL) ||                                        \
+  defined(NGHTTP2_OPENSSL_IS_LIBRESSL) || defined(NGHTTP2_OPENSSL_IS_WOLFSSL)
+  if (SSL_CTX_set_ciphersuites(ssl_ctx, tlsconf.tls13_ciphers.data()) == 0) {
     LOG(FATAL) << "SSL_CTX_set_ciphersuites " << tlsconf.tls13_ciphers
                << " failed: " << ERR_error_string(ERR_get_error(), nullptr);
     DIE();
   }
-#endif // NGHTTP2_GENUINE_OPENSSL || NGHTTP2_OPENSSL_IS_LIBRESSL
+#endif // NGHTTP2_GENUINE_OPENSSL || NGHTTP2_OPENSSL_IS_LIBRESSL ||
+       // NGHTTP2_OPENSSL_IS_WOLFSSL
 
 #ifndef OPENSSL_NO_EC
-  if (SSL_CTX_set1_curves_list(ssl_ctx, tlsconf.ecdh_curves.c_str()) != 1) {
+  if (SSL_CTX_set1_curves_list(ssl_ctx, tlsconf.ecdh_curves.data()) != 1) {
     LOG(FATAL) << "SSL_CTX_set1_curves_list " << tlsconf.ecdh_curves
                << " failed";
     DIE();
@@ -1032,7 +1046,7 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
 
   if (!tlsconf.dh_param_file.empty()) {
     // Read DH parameters from file
-    auto bio = BIO_new_file(tlsconf.dh_param_file.c_str(), "rb");
+    auto bio = BIO_new_file(tlsconf.dh_param_file.data(), "rb");
     if (bio == nullptr) {
       LOG(FATAL) << "BIO_new_file() failed: "
                  << ERR_error_string(ERR_get_error(), nullptr);
@@ -1041,8 +1055,8 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
 #if OPENSSL_3_0_0_API
     EVP_PKEY *dh = nullptr;
     auto dctx = OSSL_DECODER_CTX_new_for_pkey(
-        &dh, "PEM", nullptr, "DH", OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS,
-        nullptr, nullptr);
+      &dh, "PEM", nullptr, "DH", OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS, nullptr,
+      nullptr);
 
     if (!OSSL_DECODER_from_bio(dctx, bio)) {
       LOG(FATAL) << "OSSL_DECODER_from_bio() failed: "
@@ -1076,7 +1090,7 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
   }
 
   if (!tlsconf.cacert.empty()) {
-    if (SSL_CTX_load_verify_locations(ssl_ctx, tlsconf.cacert.c_str(),
+    if (SSL_CTX_load_verify_locations(ssl_ctx, tlsconf.cacert.data(),
                                       nullptr) != 1) {
       LOG(FATAL) << "Could not load trusted ca certificates from "
                  << tlsconf.cacert << ": "
@@ -1119,8 +1133,7 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
   if (tlsconf.client_verify.enabled) {
     if (!tlsconf.client_verify.cacert.empty()) {
       if (SSL_CTX_load_verify_locations(
-              ssl_ctx, tlsconf.client_verify.cacert.c_str(), nullptr) != 1) {
-
+            ssl_ctx, tlsconf.client_verify.cacert.data(), nullptr) != 1) {
         LOG(FATAL) << "Could not load trusted ca certificates from "
                    << tlsconf.client_verify.cacert << ": "
                    << ERR_error_string(ERR_get_error(), nullptr);
@@ -1130,7 +1143,7 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
       // error even though it returns success. See
       // http://forum.nginx.org/read.php?29,242540
       ERR_clear_error();
-      auto list = SSL_load_client_CA_file(tlsconf.client_verify.cacert.c_str());
+      auto list = SSL_load_client_CA_file(tlsconf.client_verify.cacert.data());
       if (!list) {
         LOG(FATAL) << "Could not load ca certificates from "
                    << tlsconf.client_verify.cacert << ": "
@@ -1141,7 +1154,7 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
     }
     SSL_CTX_set_verify(ssl_ctx,
                        SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE |
-                           SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                         SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
                        verify_callback);
   }
   SSL_CTX_set_tlsext_servername_callback(ssl_ctx, servername_callback);
@@ -1179,10 +1192,10 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
     // SSL_EXT_CLIENT_HELLO being set.  But the passed context value
     // is SSL_EXT_CLIENT_HELLO.
     if (SSL_CTX_add_custom_ext(
-            ssl_ctx, TLSEXT_TYPE_signed_certificate_timestamp,
-            SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_2_SERVER_HELLO |
-                SSL_EXT_TLS1_3_CERTIFICATE | SSL_EXT_IGNORE_ON_RESUMPTION,
-            sct_add_cb, sct_free_cb, nullptr, sct_parse_cb, nullptr) != 1) {
+          ssl_ctx, TLSEXT_TYPE_signed_certificate_timestamp,
+          SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_2_SERVER_HELLO |
+            SSL_EXT_TLS1_3_CERTIFICATE | SSL_EXT_IGNORE_ON_RESUMPTION,
+          sct_add_cb, sct_free_cb, nullptr, sct_parse_cb, nullptr) != 1) {
       LOG(FATAL) << "SSL_CTX_add_custom_ext failed: "
                  << ERR_error_string(ERR_get_error(), nullptr);
       DIE();
@@ -1191,20 +1204,24 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
 #elif defined(NGHTTP2_OPENSSL_IS_BORINGSSL)
   if (!tls_ctx_data->sct_data.empty() &&
       SSL_CTX_set_signed_cert_timestamp_list(
-          ssl_ctx, tls_ctx_data->sct_data.data(),
-          tls_ctx_data->sct_data.size()) != 1) {
+        ssl_ctx, tls_ctx_data->sct_data.data(),
+        tls_ctx_data->sct_data.size()) != 1) {
     LOG(FATAL) << "SSL_CTX_set_signed_cert_timestamp_list failed: "
                << ERR_error_string(ERR_get_error(), nullptr);
     DIE();
   }
 #endif // NGHTTP2_OPENSSL_IS_BORINGSSL
 
-#ifdef NGHTTP2_GENUINE_OPENSSL
+#if defined(NGHTTP2_GENUINE_OPENSSL) ||                                        \
+  (defined(NGHTTP2_OPENSSL_IS_WOLFSSL) && defined(WOLFSSL_EARLY_DATA))
   if (SSL_CTX_set_max_early_data(ssl_ctx, tlsconf.max_early_data) != 1) {
     LOG(FATAL) << "SSL_CTX_set_max_early_data failed: "
                << ERR_error_string(ERR_get_error(), nullptr);
     DIE();
   }
+#endif // NGHTTP2_GENUINE_OPENSSL || (NGHTTP2_OPENSSL_IS_WOLFSSL &&
+       // WOLFSSL_EARLY_DATA)
+#ifdef NGHTTP2_GENUINE_OPENSSL
   if (SSL_CTX_set_recv_max_early_data(ssl_ctx, tlsconf.max_early_data) != 1) {
     LOG(FATAL) << "SSL_CTX_set_recv_max_early_data failed: "
                << ERR_error_string(ERR_get_error(), nullptr);
@@ -1218,8 +1235,8 @@ SSL_CTX *create_ssl_context(const char *private_key_file, const char *cert_file,
 
 #if defined(NGHTTP2_OPENSSL_IS_BORINGSSL) && defined(HAVE_LIBBROTLI)
   if (!SSL_CTX_add_cert_compression_alg(
-          ssl_ctx, nghttp2::tls::CERTIFICATE_COMPRESSION_ALGO_BROTLI,
-          cert_compress, cert_decompress)) {
+        ssl_ctx, nghttp2::tls::CERTIFICATE_COMPRESSION_ALGO_BROTLI,
+        cert_compress, cert_decompress)) {
     LOG(FATAL) << "SSL_CTX_add_cert_compression_alg failed";
     DIE();
   }
@@ -1244,19 +1261,19 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
   }
 
   constexpr auto ssl_opts =
-      (SSL_OP_ALL & ~SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS) |
-      SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION | SSL_OP_SINGLE_ECDH_USE |
-      SSL_OP_SINGLE_DH_USE |
-      SSL_OP_CIPHER_SERVER_PREFERENCE
+    (SSL_OP_ALL & ~SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS) |
+    SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION | SSL_OP_SINGLE_ECDH_USE |
+    SSL_OP_SINGLE_DH_USE |
+    SSL_OP_CIPHER_SERVER_PREFERENCE
 #  ifdef NGHTTP2_GENUINE_OPENSSL
-      // The reason for disabling built-in anti-replay in OpenSSL is
-      // that it only works if client gets back to the same server.
-      // The freshness check described in
-      // https://tools.ietf.org/html/rfc8446#section-8.3 is still
-      // performed.
-      | SSL_OP_NO_ANTI_REPLAY
+    // The reason for disabling built-in anti-replay in OpenSSL is
+    // that it only works if client gets back to the same server.
+    // The freshness check described in
+    // https://tools.ietf.org/html/rfc8446#section-8.3 is still
+    // performed.
+    | SSL_OP_NO_ANTI_REPLAY
 #  endif // NGHTTP2_GENUINE_OPENSSL
-      ;
+    ;
 
   auto config = mod_config();
   auto &tlsconf = config->tls;
@@ -1275,6 +1292,12 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
     DIE();
   }
 #  endif // HAVE_LIBNGTCP2_CRYPTO_BORINGSSL
+#  ifdef HAVE_LIBNGTCP2_CRYPTO_WOLFSSL
+  if (ngtcp2_crypto_wolfssl_configure_server_context(ssl_ctx) != 0) {
+    LOG(FATAL) << "ngtcp2_crypto_wolfssl_configure_server_context failed";
+    DIE();
+  }
+#  endif // HAVE_LIBNGTCP2_CRYPTO_WOLFSSL
 
   const unsigned char sid_ctx[] = "shrpx";
   SSL_CTX_set_session_id_context(ssl_ctx, sid_ctx, sizeof(sid_ctx) - 1);
@@ -1282,22 +1305,25 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
 
   SSL_CTX_set_timeout(ssl_ctx, tlsconf.session_timeout.count());
 
-  if (SSL_CTX_set_cipher_list(ssl_ctx, tlsconf.ciphers.c_str()) == 0) {
+  if (SSL_CTX_set_cipher_list(ssl_ctx, tlsconf.ciphers.data()) == 0) {
     LOG(FATAL) << "SSL_CTX_set_cipher_list " << tlsconf.ciphers
                << " failed: " << ERR_error_string(ERR_get_error(), nullptr);
     DIE();
   }
 
-#  if defined(NGHTTP2_GENUINE_OPENSSL) || defined(NGHTTP2_OPENSSL_IS_LIBRESSL)
-  if (SSL_CTX_set_ciphersuites(ssl_ctx, tlsconf.tls13_ciphers.c_str()) == 0) {
+#  if defined(NGHTTP2_GENUINE_OPENSSL) ||                                      \
+    defined(NGHTTP2_OPENSSL_IS_LIBRESSL) ||                                    \
+    defined(NGHTTP2_OPENSSL_IS_WOLFSSL)
+  if (SSL_CTX_set_ciphersuites(ssl_ctx, tlsconf.tls13_ciphers.data()) == 0) {
     LOG(FATAL) << "SSL_CTX_set_ciphersuites " << tlsconf.tls13_ciphers
                << " failed: " << ERR_error_string(ERR_get_error(), nullptr);
     DIE();
   }
-#  endif // NGHTTP2_GENUINE_OPENSSL || NGHTTP2_OPENSSL_IS_LIBRESSL
+#  endif // NGHTTP2_GENUINE_OPENSSL || NGHTTP2_OPENSSL_IS_LIBRESSL ||
+         // NGHTTP2_OPENSSL_IS_WOLFSSL
 
 #  ifndef OPENSSL_NO_EC
-  if (SSL_CTX_set1_curves_list(ssl_ctx, tlsconf.ecdh_curves.c_str()) != 1) {
+  if (SSL_CTX_set1_curves_list(ssl_ctx, tlsconf.ecdh_curves.data()) != 1) {
     LOG(FATAL) << "SSL_CTX_set1_curves_list " << tlsconf.ecdh_curves
                << " failed";
     DIE();
@@ -1306,7 +1332,7 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
 
   if (!tlsconf.dh_param_file.empty()) {
     // Read DH parameters from file
-    auto bio = BIO_new_file(tlsconf.dh_param_file.c_str(), "rb");
+    auto bio = BIO_new_file(tlsconf.dh_param_file.data(), "rb");
     if (bio == nullptr) {
       LOG(FATAL) << "BIO_new_file() failed: "
                  << ERR_error_string(ERR_get_error(), nullptr);
@@ -1315,8 +1341,8 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
 #  if OPENSSL_3_0_0_API
     EVP_PKEY *dh = nullptr;
     auto dctx = OSSL_DECODER_CTX_new_for_pkey(
-        &dh, "PEM", nullptr, "DH", OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS,
-        nullptr, nullptr);
+      &dh, "PEM", nullptr, "DH", OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS, nullptr,
+      nullptr);
 
     if (!OSSL_DECODER_from_bio(dctx, bio)) {
       LOG(FATAL) << "OSSL_DECODER_from_bio() failed: "
@@ -1350,7 +1376,7 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
   }
 
   if (!tlsconf.cacert.empty()) {
-    if (SSL_CTX_load_verify_locations(ssl_ctx, tlsconf.cacert.c_str(),
+    if (SSL_CTX_load_verify_locations(ssl_ctx, tlsconf.cacert.data(),
                                       nullptr) != 1) {
       LOG(FATAL) << "Could not load trusted ca certificates from "
                  << tlsconf.cacert << ": "
@@ -1393,8 +1419,7 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
   if (tlsconf.client_verify.enabled) {
     if (!tlsconf.client_verify.cacert.empty()) {
       if (SSL_CTX_load_verify_locations(
-              ssl_ctx, tlsconf.client_verify.cacert.c_str(), nullptr) != 1) {
-
+            ssl_ctx, tlsconf.client_verify.cacert.data(), nullptr) != 1) {
         LOG(FATAL) << "Could not load trusted ca certificates from "
                    << tlsconf.client_verify.cacert << ": "
                    << ERR_error_string(ERR_get_error(), nullptr);
@@ -1404,7 +1429,7 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
       // error even though it returns success. See
       // http://forum.nginx.org/read.php?29,242540
       ERR_clear_error();
-      auto list = SSL_load_client_CA_file(tlsconf.client_verify.cacert.c_str());
+      auto list = SSL_load_client_CA_file(tlsconf.client_verify.cacert.data());
       if (!list) {
         LOG(FATAL) << "Could not load ca certificates from "
                    << tlsconf.client_verify.cacert << ": "
@@ -1415,7 +1440,7 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
     }
     SSL_CTX_set_verify(ssl_ctx,
                        SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE |
-                           SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                         SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
                        verify_callback);
   }
   SSL_CTX_set_tlsext_servername_callback(ssl_ctx, servername_callback);
@@ -1448,10 +1473,10 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
     // SSL_EXT_CLIENT_HELLO being set.  But the passed context value
     // is SSL_EXT_CLIENT_HELLO.
     if (SSL_CTX_add_custom_ext(
-            ssl_ctx, TLSEXT_TYPE_signed_certificate_timestamp,
-            SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_2_SERVER_HELLO |
-                SSL_EXT_TLS1_3_CERTIFICATE | SSL_EXT_IGNORE_ON_RESUMPTION,
-            sct_add_cb, sct_free_cb, nullptr, sct_parse_cb, nullptr) != 1) {
+          ssl_ctx, TLSEXT_TYPE_signed_certificate_timestamp,
+          SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_2_SERVER_HELLO |
+            SSL_EXT_TLS1_3_CERTIFICATE | SSL_EXT_IGNORE_ON_RESUMPTION,
+          sct_add_cb, sct_free_cb, nullptr, sct_parse_cb, nullptr) != 1) {
       LOG(FATAL) << "SSL_CTX_add_custom_ext failed: "
                  << ERR_error_string(ERR_get_error(), nullptr);
       DIE();
@@ -1460,15 +1485,16 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
 #  elif defined(NGHTTP2_OPENSSL_IS_BORINGSSL)
   if (!tls_ctx_data->sct_data.empty() &&
       SSL_CTX_set_signed_cert_timestamp_list(
-          ssl_ctx, tls_ctx_data->sct_data.data(),
-          tls_ctx_data->sct_data.size()) != 1) {
+        ssl_ctx, tls_ctx_data->sct_data.data(),
+        tls_ctx_data->sct_data.size()) != 1) {
     LOG(FATAL) << "SSL_CTX_set_signed_cert_timestamp_list failed: "
                << ERR_error_string(ERR_get_error(), nullptr);
     DIE();
   }
 #  endif // NGHTTP2_OPENSSL_IS_BORINGSSL
 
-#  ifdef NGHTTP2_GENUINE_OPENSSL
+#  if defined(NGHTTP2_GENUINE_OPENSSL) ||                                      \
+    (defined(NGHTTP2_OPENSSL_IS_WOLFSSL) && defined(WOLFSSL_EARLY_DATA))
   auto &quicconf = config->quic;
 
   if (quicconf.upstream.early_data &&
@@ -1478,7 +1504,8 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
                << ERR_error_string(ERR_get_error(), nullptr);
     DIE();
   }
-#  endif // NGHTTP2_GENUINE_OPENSSL
+#  endif // NGHTTP2_GENUINE_OPENSSL || (NGHTTP2_OPENSSL_IS_WOLFSSL &&
+         // WOLFSSL_EARLY_DATA)
 
 #  ifndef OPENSSL_NO_PSK
   SSL_CTX_set_psk_server_callback(ssl_ctx, psk_server_cb);
@@ -1486,8 +1513,8 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
 
 #  if defined(NGHTTP2_OPENSSL_IS_BORINGSSL) && defined(HAVE_LIBBROTLI)
   if (!SSL_CTX_add_cert_compression_alg(
-          ssl_ctx, nghttp2::tls::CERTIFICATE_COMPRESSION_ALGO_BROTLI,
-          cert_compress, cert_decompress)) {
+        ssl_ctx, nghttp2::tls::CERTIFICATE_COMPRESSION_ALGO_BROTLI,
+        cert_compress, cert_decompress)) {
     LOG(FATAL) << "SSL_CTX_add_cert_compression_alg failed";
     DIE();
   }
@@ -1499,10 +1526,10 @@ SSL_CTX *create_quic_ssl_context(const char *private_key_file,
 
 SSL_CTX *create_ssl_client_context(
 #ifdef HAVE_NEVERBLEED
-    neverbleed_t *nb,
+  neverbleed_t *nb,
 #endif // HAVE_NEVERBLEED
-    const StringRef &cacert, const StringRef &cert_file,
-    const StringRef &private_key_file) {
+  const StringRef &cacert, const StringRef &cert_file,
+  const StringRef &private_key_file) {
   auto ssl_ctx = SSL_CTX_new(TLS_client_method());
   if (!ssl_ctx) {
     LOG(FATAL) << ERR_error_string(ERR_get_error(), nullptr);
@@ -1524,29 +1551,31 @@ SSL_CTX *create_ssl_client_context(
   SSL_CTX_set_options(ssl_ctx, ssl_opts | tlsconf.tls_proto_mask);
 
   SSL_CTX_set_session_cache_mode(ssl_ctx, SSL_SESS_CACHE_CLIENT |
-                                              SSL_SESS_CACHE_NO_INTERNAL_STORE);
+                                            SSL_SESS_CACHE_NO_INTERNAL_STORE);
   SSL_CTX_sess_set_new_cb(ssl_ctx, tls_session_client_new_cb);
 
   if (nghttp2::tls::ssl_ctx_set_proto_versions(
-          ssl_ctx, tlsconf.min_proto_version, tlsconf.max_proto_version) != 0) {
+        ssl_ctx, tlsconf.min_proto_version, tlsconf.max_proto_version) != 0) {
     LOG(FATAL) << "Could not set TLS protocol version";
     DIE();
   }
 
-  if (SSL_CTX_set_cipher_list(ssl_ctx, tlsconf.client.ciphers.c_str()) == 0) {
+  if (SSL_CTX_set_cipher_list(ssl_ctx, tlsconf.client.ciphers.data()) == 0) {
     LOG(FATAL) << "SSL_CTX_set_cipher_list " << tlsconf.client.ciphers
                << " failed: " << ERR_error_string(ERR_get_error(), nullptr);
     DIE();
   }
 
-#if defined(NGHTTP2_GENUINE_OPENSSL) || defined(NGHTTP2_OPENSSL_IS_LIBRESSL)
-  if (SSL_CTX_set_ciphersuites(ssl_ctx, tlsconf.client.tls13_ciphers.c_str()) ==
+#if defined(NGHTTP2_GENUINE_OPENSSL) ||                                        \
+  defined(NGHTTP2_OPENSSL_IS_LIBRESSL) || defined(NGHTTP2_OPENSSL_IS_WOLFSSL)
+  if (SSL_CTX_set_ciphersuites(ssl_ctx, tlsconf.client.tls13_ciphers.data()) ==
       0) {
     LOG(FATAL) << "SSL_CTX_set_ciphersuites " << tlsconf.client.tls13_ciphers
                << " failed: " << ERR_error_string(ERR_get_error(), nullptr);
     DIE();
   }
-#endif // NGHTTP2_GENUINE_OPENSSL || NGHTTP2_OPENSSL_IS_LIBRESSL
+#endif // NGHTTP2_GENUINE_OPENSSL || NGHTTP2_OPENSSL_IS_LIBRESSL ||
+       // NGHTTP2_OPENSSL_IS_WOLFSSL
 
   SSL_CTX_set_mode(ssl_ctx, SSL_MODE_RELEASE_BUFFERS);
 
@@ -1556,8 +1585,7 @@ SSL_CTX *create_ssl_client_context(
   }
 
   if (!cacert.empty()) {
-    if (SSL_CTX_load_verify_locations(ssl_ctx, cacert.c_str(), nullptr) != 1) {
-
+    if (SSL_CTX_load_verify_locations(ssl_ctx, cacert.data(), nullptr) != 1) {
       LOG(FATAL) << "Could not load trusted ca certificates from " << cacert
                  << ": " << ERR_error_string(ERR_get_error(), nullptr);
       DIE();
@@ -1569,8 +1597,7 @@ SSL_CTX *create_ssl_client_context(
   }
 
   if (!cert_file.empty()) {
-    if (SSL_CTX_use_certificate_chain_file(ssl_ctx, cert_file.c_str()) != 1) {
-
+    if (SSL_CTX_use_certificate_chain_file(ssl_ctx, cert_file.data()) != 1) {
       LOG(FATAL) << "Could not load client certificate from " << cert_file
                  << ": " << ERR_error_string(ERR_get_error(), nullptr);
       DIE();
@@ -1579,7 +1606,7 @@ SSL_CTX *create_ssl_client_context(
 
   if (!private_key_file.empty()) {
 #ifndef HAVE_NEVERBLEED
-    if (SSL_CTX_use_PrivateKey_file(ssl_ctx, private_key_file.c_str(),
+    if (SSL_CTX_use_PrivateKey_file(ssl_ctx, private_key_file.data(),
                                     SSL_FILETYPE_PEM) != 1) {
       LOG(FATAL) << "Could not load client private key from "
                  << private_key_file << ": "
@@ -1588,7 +1615,7 @@ SSL_CTX *create_ssl_client_context(
     }
 #else  // HAVE_NEVERBLEED
     std::array<char, NEVERBLEED_ERRBUF_SIZE> errbuf;
-    if (neverbleed_load_private_key_file(nb, ssl_ctx, private_key_file.c_str(),
+    if (neverbleed_load_private_key_file(nb, ssl_ctx, private_key_file.data(),
                                          errbuf.data()) != 1) {
       LOG(FATAL) << "neverbleed_load_private_key_file: could not load client "
                     "private key from "
@@ -1604,8 +1631,8 @@ SSL_CTX *create_ssl_client_context(
 
 #if defined(NGHTTP2_OPENSSL_IS_BORINGSSL) && defined(HAVE_LIBBROTLI)
   if (!SSL_CTX_add_cert_compression_alg(
-          ssl_ctx, nghttp2::tls::CERTIFICATE_COMPRESSION_ALGO_BROTLI,
-          cert_compress, cert_decompress)) {
+        ssl_ctx, nghttp2::tls::CERTIFICATE_COMPRESSION_ALGO_BROTLI,
+        cert_compress, cert_decompress)) {
     LOG(FATAL) << "SSL_CTX_add_cert_compression_alg failed";
     DIE();
   }
@@ -1683,8 +1710,8 @@ bool tls_hostname_match(const StringRef &pattern, const StringRef &hostname) {
   // character is embedded within an A-label.
   if (ptLeftLabelEnd == std::end(pattern) ||
       std::find(ptLeftLabelEnd + 1, std::end(pattern), '.') ==
-          std::end(pattern) ||
-      ptLeftLabelEnd < ptWildcard || util::istarts_with_l(pattern, "xn--")) {
+        std::end(pattern) ||
+      ptLeftLabelEnd < ptWildcard || util::istarts_with(pattern, "xn--"_sr)) {
     wildcardEnabled = false;
   }
 
@@ -1693,7 +1720,7 @@ bool tls_hostname_match(const StringRef &pattern, const StringRef &hostname) {
   }
 
   auto hnLeftLabelEnd =
-      std::find(std::begin(hostname), std::end(hostname), '.');
+    std::find(std::begin(hostname), std::end(hostname), '.');
   if (hnLeftLabelEnd == std::end(hostname) ||
       !util::strieq(StringRef{ptLeftLabelEnd, std::end(pattern)},
                     StringRef{hnLeftLabelEnd, std::end(hostname)})) {
@@ -1767,7 +1794,7 @@ int verify_numeric_hostname(X509 *cert, const StringRef &hostname,
   }
 
   auto altnames = static_cast<GENERAL_NAMES *>(
-      X509_get_ext_d2i(cert, NID_subject_alt_name, nullptr, nullptr));
+    X509_get_ext_d2i(cert, NID_subject_alt_name, nullptr, nullptr));
   if (altnames) {
     auto altnames_deleter = defer(GENERAL_NAMES_free, altnames);
     size_t n = sk_GENERAL_NAME_num(altnames);
@@ -1801,8 +1828,8 @@ int verify_numeric_hostname(X509 *cert, const StringRef &hostname,
   }
 
   // cn is not NULL terminated
-  auto rv = util::streq(hostname, cn);
-  OPENSSL_free(const_cast<char *>(cn.c_str()));
+  auto rv = hostname == cn;
+  OPENSSL_free(const_cast<char *>(cn.data()));
 
   if (rv) {
     return 0;
@@ -1813,7 +1840,7 @@ int verify_numeric_hostname(X509 *cert, const StringRef &hostname,
 
 int verify_dns_hostname(X509 *cert, const StringRef &hostname) {
   auto altnames = static_cast<GENERAL_NAMES *>(
-      X509_get_ext_d2i(cert, NID_subject_alt_name, nullptr, nullptr));
+    X509_get_ext_d2i(cert, NID_subject_alt_name, nullptr, nullptr));
   if (altnames) {
     auto dns_found = false;
     auto altnames_deleter = defer(GENERAL_NAMES_free, altnames);
@@ -1867,15 +1894,15 @@ int verify_dns_hostname(X509 *cert, const StringRef &hostname) {
 
   if (cn[cn.size() - 1] == '.') {
     if (cn.size() == 1) {
-      OPENSSL_free(const_cast<char *>(cn.c_str()));
+      OPENSSL_free(const_cast<char *>(cn.data()));
 
       return -1;
     }
-    cn = StringRef{cn.c_str(), cn.size() - 1};
+    cn = StringRef{cn.data(), cn.size() - 1};
   }
 
   auto rv = tls_hostname_match(cn, hostname);
-  OPENSSL_free(const_cast<char *>(cn.c_str()));
+  OPENSSL_free(const_cast<char *>(cn.data()));
 
   return rv ? 0 : -1;
 }
@@ -1883,7 +1910,7 @@ int verify_dns_hostname(X509 *cert, const StringRef &hostname) {
 namespace {
 int verify_hostname(X509 *cert, const StringRef &hostname,
                     const Address *addr) {
-  if (util::numeric_host(hostname.c_str())) {
+  if (util::numeric_host(hostname.data())) {
     return verify_numeric_hostname(cert, hostname, addr);
   }
 
@@ -1916,14 +1943,14 @@ int check_cert(SSL *ssl, const Address *addr, const StringRef &host) {
 
 int check_cert(SSL *ssl, const DownstreamAddr *addr, const Address *raddr) {
   auto hostname =
-      addr->sni.empty() ? StringRef{addr->host} : StringRef{addr->sni};
+    addr->sni.empty() ? StringRef{addr->host} : StringRef{addr->sni};
   return check_cert(ssl, raddr, hostname);
 }
 
 CertLookupTree::CertLookupTree() {}
 
 ssize_t CertLookupTree::add_cert(const StringRef &hostname, size_t idx) {
-  std::array<uint8_t, NI_MAXHOST> buf;
+  std::array<char, NI_MAXHOST> buf;
 
   // NI_MAXHOST includes terminal NULL byte
   if (hostname.empty() || hostname.size() + 1 > buf.size()) {
@@ -1936,10 +1963,10 @@ ssize_t CertLookupTree::add_cert(const StringRef &hostname, size_t idx) {
     auto wildcard_prefix = StringRef{std::begin(hostname), wildcard_it};
     auto wildcard_suffix = StringRef{wildcard_it + 1, std::end(hostname)};
 
-    auto rev_suffix = StringRef{std::begin(buf),
-                                std::reverse_copy(std::begin(wildcard_suffix),
-                                                  std::end(wildcard_suffix),
-                                                  std::begin(buf))};
+    auto rev_suffix =
+      StringRef{std::begin(buf),
+                std::reverse_copy(std::begin(wildcard_suffix),
+                                  std::end(wildcard_suffix), std::begin(buf))};
 
     WildcardPattern *wpat;
 
@@ -1955,10 +1982,10 @@ ssize_t CertLookupTree::add_cert(const StringRef &hostname, size_t idx) {
       wpat = &wildcard_patterns_.back();
     }
 
-    auto rev_prefix = StringRef{std::begin(buf),
-                                std::reverse_copy(std::begin(wildcard_prefix),
-                                                  std::end(wildcard_prefix),
-                                                  std::begin(buf))};
+    auto rev_prefix =
+      StringRef{std::begin(buf),
+                std::reverse_copy(std::begin(wildcard_prefix),
+                                  std::end(wildcard_prefix), std::begin(buf))};
 
     for (auto &p : wpat->rev_prefix) {
       if (p.prefix == rev_prefix) {
@@ -1975,7 +2002,7 @@ ssize_t CertLookupTree::add_cert(const StringRef &hostname, size_t idx) {
 }
 
 ssize_t CertLookupTree::lookup(const StringRef &hostname) {
-  std::array<uint8_t, NI_MAXHOST> buf;
+  std::array<char, NI_MAXHOST> buf;
 
   // NI_MAXHOST includes terminal NULL byte
   if (hostname.empty() || hostname.size() + 1 > buf.size()) {
@@ -1997,14 +2024,14 @@ ssize_t CertLookupTree::lookup(const StringRef &hostname) {
   const RNode *last_node = nullptr;
 
   auto rev_host = StringRef{
-      std::begin(buf), std::reverse_copy(std::begin(hostname),
-                                         std::end(hostname), std::begin(buf))};
+    std::begin(buf), std::reverse_copy(std::begin(hostname), std::end(hostname),
+                                       std::begin(buf))};
 
   for (;;) {
     size_t nread = 0;
 
     auto wcidx =
-        rev_wildcard_router_.match_prefix(&nread, &last_node, rev_host);
+      rev_wildcard_router_.match_prefix(&nread, &last_node, rev_host);
     if (wcidx == -1) {
       return best_idx;
     }
@@ -2024,9 +2051,7 @@ ssize_t CertLookupTree::lookup(const StringRef &hostname) {
         continue;
       }
 
-      auto prefixlen =
-          wprefix.prefix.size() +
-          (reinterpret_cast<const uint8_t *>(&rev_host[0]) - &buf[0]);
+      auto prefixlen = wprefix.prefix.size() + (&rev_host[0] - &buf[0]);
 
       // Breaking a tie with longer suffix
       if (prefixlen < best_prefixlen) {
@@ -2047,13 +2072,13 @@ void CertLookupTree::dump() const {
 }
 
 int cert_lookup_tree_add_ssl_ctx(
-    CertLookupTree *lt, std::vector<std::vector<SSL_CTX *>> &indexed_ssl_ctx,
-    SSL_CTX *ssl_ctx) {
-  std::array<uint8_t, NI_MAXHOST> buf;
+  CertLookupTree *lt, std::vector<std::vector<SSL_CTX *>> &indexed_ssl_ctx,
+  SSL_CTX *ssl_ctx) {
+  std::array<char, NI_MAXHOST> buf;
 
   auto cert = SSL_CTX_get0_certificate(ssl_ctx);
   auto altnames = static_cast<GENERAL_NAMES *>(
-      X509_get_ext_d2i(cert, NID_subject_alt_name, nullptr, nullptr));
+    X509_get_ext_d2i(cert, NID_subject_alt_name, nullptr, nullptr));
   if (altnames) {
     auto altnames_deleter = defer(GENERAL_NAMES_free, altnames);
     size_t n = sk_GENERAL_NAME_num(altnames);
@@ -2121,22 +2146,22 @@ int cert_lookup_tree_add_ssl_ctx(
 
   if (cn[cn.size() - 1] == '.') {
     if (cn.size() == 1) {
-      OPENSSL_free(const_cast<char *>(cn.c_str()));
+      OPENSSL_free(const_cast<char *>(cn.data()));
 
       return 0;
     }
 
-    cn = StringRef{cn.c_str(), cn.size() - 1};
+    cn = StringRef{cn.data(), cn.size() - 1};
   }
 
   auto end_buf = std::copy(std::begin(cn), std::end(cn), std::begin(buf));
 
-  OPENSSL_free(const_cast<char *>(cn.c_str()));
+  OPENSSL_free(const_cast<char *>(cn.data()));
 
   util::inp_strlower(std::begin(buf), end_buf);
 
   auto idx =
-      lt->add_cert(StringRef{std::begin(buf), end_buf}, indexed_ssl_ctx.size());
+    lt->add_cert(StringRef{std::begin(buf), end_buf}, indexed_ssl_ctx.size());
   if (idx == -1) {
     return 0;
   }
@@ -2154,7 +2179,7 @@ int cert_lookup_tree_add_ssl_ctx(
 bool in_proto_list(const std::vector<StringRef> &protos,
                    const StringRef &needle) {
   for (auto &proto : protos) {
-    if (util::streq(proto, needle)) {
+    if (proto == needle) {
       return true;
     }
   }
@@ -2210,8 +2235,8 @@ setup_server_ssl_context(std::vector<SSL_CTX *> &all_ssl_ctx,
 
   auto &tlsconf = config->tls;
 
-  auto ssl_ctx = create_ssl_context(tlsconf.private_key_file.c_str(),
-                                    tlsconf.cert_file.c_str(), tlsconf.sct_data
+  auto ssl_ctx = create_ssl_context(tlsconf.private_key_file.data(),
+                                    tlsconf.cert_file.data(), tlsconf.sct_data
 #ifdef HAVE_NEVERBLEED
                                     ,
                                     nb
@@ -2228,8 +2253,8 @@ setup_server_ssl_context(std::vector<SSL_CTX *> &all_ssl_ctx,
   }
 
   for (auto &c : tlsconf.subcerts) {
-    auto ssl_ctx = create_ssl_context(c.private_key_file.c_str(),
-                                      c.cert_file.c_str(), c.sct_data
+    auto ssl_ctx = create_ssl_context(c.private_key_file.data(),
+                                      c.cert_file.data(), c.sct_data
 #ifdef HAVE_NEVERBLEED
                                       ,
                                       nb
@@ -2249,12 +2274,12 @@ setup_server_ssl_context(std::vector<SSL_CTX *> &all_ssl_ctx,
 
 #ifdef ENABLE_HTTP3
 SSL_CTX *setup_quic_server_ssl_context(
-    std::vector<SSL_CTX *> &all_ssl_ctx,
-    std::vector<std::vector<SSL_CTX *>> &indexed_ssl_ctx,
-    CertLookupTree *cert_tree
+  std::vector<SSL_CTX *> &all_ssl_ctx,
+  std::vector<std::vector<SSL_CTX *>> &indexed_ssl_ctx,
+  CertLookupTree *cert_tree
 #  ifdef HAVE_NEVERBLEED
-    ,
-    neverbleed_t *nb
+  ,
+  neverbleed_t *nb
 #  endif // HAVE_NEVERBLEED
 ) {
   auto config = get_config();
@@ -2265,14 +2290,13 @@ SSL_CTX *setup_quic_server_ssl_context(
 
   auto &tlsconf = config->tls;
 
-  auto ssl_ctx =
-      create_quic_ssl_context(tlsconf.private_key_file.c_str(),
-                              tlsconf.cert_file.c_str(), tlsconf.sct_data
+  auto ssl_ctx = create_quic_ssl_context(
+    tlsconf.private_key_file.data(), tlsconf.cert_file.data(), tlsconf.sct_data
 #  ifdef HAVE_NEVERBLEED
-                              ,
-                              nb
+    ,
+    nb
 #  endif // HAVE_NEVERBLEED
-      );
+  );
 
   all_ssl_ctx.push_back(ssl_ctx);
 
@@ -2284,8 +2308,8 @@ SSL_CTX *setup_quic_server_ssl_context(
   }
 
   for (auto &c : tlsconf.subcerts) {
-    auto ssl_ctx = create_quic_ssl_context(c.private_key_file.c_str(),
-                                           c.cert_file.c_str(), c.sct_data
+    auto ssl_ctx = create_quic_ssl_context(c.private_key_file.data(),
+                                           c.cert_file.data(), c.sct_data
 #  ifdef HAVE_NEVERBLEED
                                            ,
                                            nb
@@ -2306,17 +2330,16 @@ SSL_CTX *setup_quic_server_ssl_context(
 
 SSL_CTX *setup_downstream_client_ssl_context(
 #ifdef HAVE_NEVERBLEED
-    neverbleed_t *nb
+  neverbleed_t *nb
 #endif // HAVE_NEVERBLEED
 ) {
   auto &tlsconf = get_config()->tls;
 
   return create_ssl_client_context(
 #ifdef HAVE_NEVERBLEED
-      nb,
+    nb,
 #endif // HAVE_NEVERBLEED
-      tlsconf.cacert, tlsconf.client.cert_file,
-      tlsconf.client.private_key_file);
+    tlsconf.cacert, tlsconf.client.cert_file, tlsconf.client.private_key_file);
 }
 
 void setup_downstream_http2_alpn(SSL *ssl) {
@@ -2378,17 +2401,17 @@ SSL_SESSION *reuse_tls_session(const TLSSessionCache &cache) {
 
 int proto_version_from_string(const StringRef &v) {
 #ifdef TLS1_3_VERSION
-  if (util::strieq_l("TLSv1.3", v)) {
+  if (util::strieq("TLSv1.3"_sr, v)) {
     return TLS1_3_VERSION;
   }
 #endif // TLS1_3_VERSION
-  if (util::strieq_l("TLSv1.2", v)) {
+  if (util::strieq("TLSv1.2"_sr, v)) {
     return TLS1_2_VERSION;
   }
-  if (util::strieq_l("TLSv1.1", v)) {
+  if (util::strieq("TLSv1.1"_sr, v)) {
     return TLS1_1_VERSION;
   }
-  if (util::strieq_l("TLSv1.0", v)) {
+  if (util::strieq("TLSv1.0"_sr, v)) {
     return TLS1_VERSION;
   }
   return -1;
@@ -2500,9 +2523,9 @@ StringRef get_x509_name(BlockAllocator &balloc, X509_NAME *nm) {
   }
 
   auto iov = make_byte_ref(balloc, slen + 1);
-  BIO_read(b, iov.base, slen);
-  iov.base[slen] = '\0';
-  return StringRef{iov.base, static_cast<size_t>(slen)};
+  BIO_read(b, iov.data(), slen);
+  iov[slen] = '\0';
+  return StringRef{iov.data(), static_cast<size_t>(slen)};
 }
 } // namespace
 
@@ -2526,7 +2549,7 @@ StringRef get_x509_serial(BlockAllocator &balloc, X509 *x) {
   auto n = BN_bn2bin(bn, b.data());
   assert(n <= 20);
 
-  return util::format_hex(balloc, StringRef{b.data(), static_cast<size_t>(n)});
+  return util::format_hex(balloc, std::span{b.data(), static_cast<size_t>(n)});
 }
 
 namespace {
@@ -2535,7 +2558,8 @@ namespace {
 int time_t_from_asn1_time(time_t &t, const ASN1_TIME *at) {
   int rv;
 
-#if defined(NGHTTP2_GENUINE_OPENSSL) || defined(NGHTTP2_OPENSSL_IS_LIBRESSL)
+#if defined(NGHTTP2_GENUINE_OPENSSL) ||                                        \
+  defined(NGHTTP2_OPENSSL_IS_LIBRESSL) || defined(NGHTTP2_OPENSSL_IS_WOLFSSL)
   struct tm tm;
   rv = ASN1_TIME_to_tm(at, &tm);
   if (rv != 1) {
@@ -2543,7 +2567,8 @@ int time_t_from_asn1_time(time_t &t, const ASN1_TIME *at) {
   }
 
   t = nghttp2_timegm(&tm);
-#else // !NGHTTP2_GENUINE_OPENSSL && !NGHTTP2_OPENSSL_IS_LIBRESSL
+#else // !NGHTTP2_GENUINE_OPENSSL && !NGHTTP2_OPENSSL_IS_LIBRESSL &&
+      // !NGHTTP2_OPENSSL_IS_WOLFSSL
   auto b = BIO_new(BIO_s_mem());
   if (!b) {
     return -1;
@@ -2563,13 +2588,14 @@ int time_t_from_asn1_time(time_t &t, const ASN1_TIME *at) {
 #  endif
   auto slen = BIO_get_mem_data(b, &s);
   auto tt = util::parse_openssl_asn1_time_print(
-      StringRef{s, static_cast<size_t>(slen)});
+    StringRef{s, static_cast<size_t>(slen)});
   if (tt == 0) {
     return -1;
   }
 
   t = tt;
-#endif // !NGHTTP2_GENUINE_OPENSSL && !NGHTTP2_OPENSSL_IS_LIBRESSL
+#endif // !NGHTTP2_GENUINE_OPENSSL && !NGHTTP2_OPENSSL_IS_LIBRESSL &&
+       // !NGHTTP2_OPENSSL_IS_WOLFSSL
 
   return 0;
 }

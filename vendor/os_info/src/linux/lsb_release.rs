@@ -20,6 +20,8 @@ pub fn get() -> Option<Info> {
         Some("Amazon") | Some("AmazonAMI") => Type::Amazon,
         Some("Arch") => Type::Arch,
         Some("Artix") => Type::Artix,
+        Some("Bluefin") => Type::Bluefin,
+        Some("cachyos") => Type::CachyOS,
         Some("CentOS") => Type::CentOS,
         Some("Debian") => Type::Debian,
         Some("EndeavourOS") => Type::EndeavourOS,
@@ -32,6 +34,8 @@ pub fn get() -> Option<Info> {
         Some("ManjaroLinux") => Type::Manjaro,
         Some("Mariner") => Type::Mariner,
         Some("NixOS") => Type::NixOS,
+        Some("NobaraLinux") => Type::Nobara,
+        Some("Uos") => Type::Uos,
         Some("OpenCloudOS") => Type::OpenCloudOS,
         Some("openEuler") => Type::openEuler,
         Some("openSUSE") => Type::openSUSE,
@@ -181,6 +185,22 @@ mod tests {
             Some("21.05pre275822.916ee862e87".to_string())
         );
         assert_eq!(parse_results.codename, Some("okapi".to_string()));
+    }
+
+    #[test]
+    fn nobara() {
+        let parse_results = parse(nobara_file());
+        assert_eq!(parse_results.distribution, Some("NobaraLinux".to_string()));
+        assert_eq!(parse_results.version, Some("39".to_string()));
+        assert_eq!(parse_results.codename, None);
+    }
+
+    #[test]
+    fn uos() {
+        let parse_results = parse(uos_file());
+        assert_eq!(parse_results.distribution, Some("uos".to_string()));
+        assert_eq!(parse_results.version, Some("20".to_string()));
+        assert_eq!(parse_results.codename, Some("eagle".to_string()));
     }
 
     #[test]
@@ -338,6 +358,13 @@ mod tests {
         assert_eq!(parse_results.codename, None);
     }
 
+    #[test]
+    fn cachyos() {
+        let parse_results = parse(cachyos_file());
+        assert_eq!(parse_results.distribution, Some("cachyos".to_string()));
+        assert_eq!(parse_results.version, Some("rolling".to_string()));
+    }
+
     fn file() -> &'static str {
         "\nDistributor ID:	Debian\n\
          Description:	Debian GNU/Linux 7.8 (wheezy)\n\
@@ -405,6 +432,23 @@ mod tests {
          Description:    NixOS 21.05 (Okapi)\n\
          Release:        21.05pre275822.916ee862e87\n\
          Codename:       okapi"
+    }
+
+    fn nobara_file() -> &'static str {
+        "LSB Version:	n/a\n\
+        Distributor ID:	NobaraLinux\n\
+        Description:	Nobara Linux 39 (KDE Plasma)\n\
+        Release:	39\n\
+        Codename:	n/a\n\
+        "
+    }
+
+    fn uos_file() -> &'static str {
+        "Distributor ID: uos\n\
+         Description:	 UnionTech OS 20\n\
+         Release:	     20\n\
+         Codename:	     eagle\n\
+         "
     }
 
     // Amazon Linux 1 uses a separate Distributor ID and Release format from Amazon Linux 2
@@ -569,5 +613,13 @@ mod tests {
           Release:        rolling\n\
           Codename:        n/a\n\
           "
+    }
+
+    fn cachyos_file() -> &'static str {
+        "Distributor ID: cachyos\n\
+         Description:	 CachyOS\n\
+         Release:	     rolling\n\
+         Codename:	     n/a\n\
+         "
     }
 }

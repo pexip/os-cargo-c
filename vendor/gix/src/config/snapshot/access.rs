@@ -3,10 +3,10 @@ use std::borrow::Cow;
 use std::ffi::OsStr;
 
 use gix_features::threading::OwnShared;
-use gix_macros::momo;
 
+use crate::bstr::ByteSlice;
 use crate::{
-    bstr::{BStr, BString, ByteSlice},
+    bstr::{BStr, BString},
     config::{CommitAutoRollback, Snapshot, SnapshotMut},
 };
 
@@ -27,9 +27,8 @@ impl<'repo> Snapshot<'repo> {
     }
 
     /// Like [`boolean()`][Self::boolean()], but it will report an error if the value couldn't be interpreted as boolean.
-    #[momo]
     pub fn try_boolean<'a>(&self, key: impl Into<&'a BStr>) -> Option<Result<bool, gix_config::value::Error>> {
-        self.repo.config.resolved.boolean_by_key(key)
+        self.repo.config.resolved.boolean(key.into())
     }
 
     /// Return the resolved integer at `key`, or `None` if there is no such value or if the value can't be interpreted as
@@ -43,42 +42,35 @@ impl<'repo> Snapshot<'repo> {
     }
 
     /// Like [`integer()`][Self::integer()], but it will report an error if the value couldn't be interpreted as boolean.
-    #[momo]
     pub fn try_integer<'a>(&self, key: impl Into<&'a BStr>) -> Option<Result<i64, gix_config::value::Error>> {
-        self.repo.config.resolved.integer_by_key(key)
+        self.repo.config.resolved.integer(key.into())
     }
 
     /// Return the string at `key`, or `None` if there is no such value.
     ///
     /// Note that this method takes the most recent value at `key` even if it is from a file with reduced trust.
-    #[momo]
     pub fn string<'a>(&self, key: impl Into<&'a BStr>) -> Option<Cow<'repo, BStr>> {
-        self.repo.config.resolved.string_by_key(key)
+        self.repo.config.resolved.string(key.into())
     }
 
     /// Return the trusted and fully interpolated path at `key`, or `None` if there is no such value
     /// or if no value was found in a trusted file.
     /// An error occurs if the path could not be interpolated to its final value.
-    #[momo]
     pub fn trusted_path<'a>(
         &self,
         key: impl Into<&'a BStr>,
     ) -> Option<Result<Cow<'repo, std::path::Path>, gix_config::path::interpolate::Error>> {
-        let key = gix_config::parse::key(key.into())?;
-        self.repo
-            .config
-            .trusted_file_path(key.section_name, key.subsection_name, key.value_name)
+        self.repo.config.trusted_file_path(key.into())
     }
 
     /// Return the trusted string at `key` for launching using [command::prepare()](gix_command::prepare()),
     /// or `None` if there is no such value or if no value was found in a trusted file.
-    #[momo]
     pub fn trusted_program<'a>(&self, key: impl Into<&'a BStr>) -> Option<Cow<'repo, OsStr>> {
         let value = self
             .repo
             .config
             .resolved
-            .string_filter_by_key(key, &mut self.repo.config.filter_config_section.clone())?;
+            .string_filter(key.into(), &mut self.repo.config.filter_config_section.clone())?;
         Some(match gix_path::from_bstr(value) {
             Cow::Borrowed(v) => Cow::Borrowed(v.as_os_str()),
             Cow::Owned(v) => Cow::Owned(v.into_os_string()),
@@ -87,7 +79,7 @@ impl<'repo> Snapshot<'repo> {
 }
 
 /// Utilities and additional access
-impl<'repo> Snapshot<'repo> {
+impl Snapshot<'_> {
     /// Returns the underlying configuration implementation for a complete API, despite being a little less convenient.
     ///
     /// It's expected that more functionality will move up depending on demand.
@@ -122,7 +114,6 @@ impl<'repo> SnapshotMut<'repo> {
 
     /// Set the value at `key` to `new_value`, possibly creating the section if it doesn't exist yet, or overriding the most recent existing
     /// value, which will be returned.
-    #[momo]
     pub fn set_value<'b>(
         &mut self,
         key: &'static dyn crate::config::tree::Key,
@@ -135,17 +126,17 @@ impl<'repo> SnapshotMut<'repo> {
         key.validate(value)?;
         let section = key.section();
         let current = match section.parent() {
-            Some(parent) => self
-                .config
-                .set_raw_value(parent.name(), Some(section.name().into()), key.name(), value)?,
-            None => self.config.set_raw_value(section.name(), None, key.name(), value)?,
+            Some(parent) => {
+                self.config
+                    .set_raw_value_by(parent.name(), Some(section.name().into()), key.name(), value)?
+            }
+            None => self.config.set_raw_value_by(section.name(), None, key.name(), value)?,
         };
         Ok(current.map(std::borrow::Cow::into_owned))
     }
 
     /// Set the value at `key` to `new_value` in the given `subsection`, possibly creating the section and sub-section if it doesn't exist yet,
     /// or overriding the most recent existing value, which will be returned.
-    #[momo]
     pub fn set_subsection_value<'a, 'b>(
         &mut self,
         key: &'static dyn crate::config::tree::Key,
@@ -161,10 +152,11 @@ impl<'repo> SnapshotMut<'repo> {
         let name = key
             .full_name(Some(subsection.into()))
             .expect("we know it needs a subsection");
-        let key = gix_config::parse::key((**name).as_bstr()).expect("statically known keys can always be parsed");
+        let key = gix_config::KeyRef::parse_unvalidated((**name).as_bstr())
+            .expect("statically known keys can always be parsed");
         let current =
             self.config
-                .set_raw_value(key.section_name, key.subsection_name, key.value_name.to_owned(), value)?;
+                .set_raw_value_by(key.section_name, key.subsection_name, key.value_name.to_owned(), value)?;
         Ok(current.map(std::borrow::Cow::into_owned))
     }
 

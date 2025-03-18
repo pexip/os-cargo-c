@@ -64,7 +64,7 @@ impl super::Store {
     pub(crate) fn load_all_indices(&self) -> Result<Snapshot, Error> {
         let mut snapshot = self.collect_snapshot();
         while let Some(new_snapshot) = self.load_one_index(RefreshMode::Never, snapshot.marker)? {
-            snapshot = new_snapshot
+            snapshot = new_snapshot;
         }
         Ok(snapshot)
     }
@@ -157,7 +157,7 @@ impl super::Store {
                         // or its effects.
                         std::thread::yield_now();
                         while index.num_indices_currently_being_loaded.load(Ordering::SeqCst) != 0 {
-                            std::thread::yield_now()
+                            std::thread::yield_now();
                         }
                         break 'retry_with_next_slot_index;
                     }
@@ -497,7 +497,7 @@ impl super::Store {
                     indices
                         .into_iter()
                         .filter_map(|(p, a, b)| (!is_multipack_index(&p)).then_some((Either::IndexPath(p), a, b))),
-                )
+                );
             }
         }
         // Unlike libgit2, do not sort by modification date, but by size and put the biggest indices first. That way
@@ -683,7 +683,7 @@ impl<'a> IncOnNewAndDecOnDrop<'a> {
         Self(v)
     }
 }
-impl<'a> Drop for IncOnNewAndDecOnDrop<'a> {
+impl Drop for IncOnNewAndDecOnDrop<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
     }

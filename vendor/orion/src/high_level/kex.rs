@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2021-2023 The orion Developers
+// Copyright (c) 2021-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,8 +27,8 @@
 //!
 //! # About:
 //! - Both [`EphemeralClientSession`] and [`EphemeralServerSession`] consume `self` when shared keys
-//! are being established. You can therefore never use the same private key for more than a single
-//! key exchange.
+//!   are being established. You can therefore never use the same private key for more than a single
+//!   key exchange.
 //!
 //! This implementation is based on and compatible with the
 //! [key exchange API](https://doc.libsodium.org/key_exchange) of libsodium.

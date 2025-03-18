@@ -45,21 +45,23 @@ use std::{env, fs, str};
 
 use anyhow::{bail, Context as _};
 use cargo_util::{exit_status_to_string, is_simple_exit_code, paths, ProcessBuilder};
+use cargo_util_schemas::manifest::TomlManifest;
 use rustfix::diagnostics::Diagnostic;
 use rustfix::CodeFix;
 use semver::Version;
 use tracing::{debug, trace, warn};
 
+use crate::core::compiler::CompileKind;
 use crate::core::compiler::RustcTargetData;
 use crate::core::resolver::features::{DiffMap, FeatureOpts, FeatureResolver, FeaturesFor};
 use crate::core::resolver::{HasDevUnits, Resolve, ResolveBehavior};
+use crate::core::PackageIdSpecQuery as _;
 use crate::core::{Edition, MaybePackage, Package, PackageId, Workspace};
-use crate::core::{FeatureValue, PackageIdSpecQuery as _};
 use crate::ops::resolve::WorkspaceResolve;
 use crate::ops::{self, CompileOptions};
 use crate::util::diagnostic_server::{Message, RustfixDiagnosticServer};
 use crate::util::errors::CargoResult;
-use crate::util::interning::InternedString;
+use crate::util::toml_mut::manifest::LocalManifest;
 use crate::util::GlobalContext;
 use crate::util::{existing_vcs_repo, LockServer, LockServerClient};
 use crate::{drop_eprint, drop_eprintln};
@@ -78,6 +80,14 @@ const EDITION_ENV_INTERNAL: &str = "__CARGO_FIX_EDITION";
 /// **Internal only.**
 /// For passing [`FixOptions::idioms`] through to cargo running in proxy mode.
 const IDIOMS_ENV_INTERNAL: &str = "__CARGO_FIX_IDIOMS";
+/// **Internal only.**
+/// The sysroot path.
+///
+/// This is for preventing `cargo fix` from fixing rust std/core libs. See
+///
+/// * <https://github.com/rust-lang/cargo/issues/9857>
+/// * <https://github.com/rust-lang/rust/issues/88514#issuecomment-2043469384>
+const SYSROOT_INTERNAL: &str = "__CARGO_FIX_RUST_SRC";
 
 pub struct FixOptions {
     pub edition: bool,
@@ -87,6 +97,7 @@ pub struct FixOptions {
     pub allow_no_vcs: bool,
     pub allow_staged: bool,
     pub broken_code: bool,
+    pub requested_lockfile_path: Option<PathBuf>,
 }
 
 pub fn fix(
@@ -97,6 +108,8 @@ pub fn fix(
 ) -> CargoResult<()> {
     check_version_control(gctx, opts)?;
 
+    let mut target_data =
+        RustcTargetData::new(original_ws, &opts.compile_opts.build_config.requested_kinds)?;
     if opts.edition {
         let specs = opts.compile_opts.spec.to_package_id_specs(&original_ws)?;
         let members: Vec<&Package> = original_ws
@@ -105,10 +118,11 @@ pub fn fix(
             .collect();
         migrate_manifests(original_ws, &members)?;
 
-        check_resolver_change(&original_ws, opts)?;
+        check_resolver_change(&original_ws, &mut target_data, opts)?;
     }
     let mut ws = Workspace::new(&root_manifest, gctx)?;
     ws.set_resolve_honors_rust_version(Some(original_ws.resolve_honors_rust_version()));
+    ws.set_requested_lockfile_path(opts.requested_lockfile_path.clone());
 
     // Spin up our lock server, which our subprocesses will use to synchronize fixes.
     let lock_server = LockServer::new()?;
@@ -127,6 +141,11 @@ pub fn fix(
     }
     if opts.idioms {
         wrapper.env(IDIOMS_ENV_INTERNAL, "1");
+    }
+
+    let sysroot = &target_data.info(CompileKind::Host).sysroot;
+    if sysroot.is_dir() {
+        wrapper.env(SYSROOT_INTERNAL, sysroot);
     }
 
     *opts
@@ -233,6 +252,59 @@ fn check_version_control(gctx: &GlobalContext, opts: &FixOptions) -> CargoResult
 }
 
 fn migrate_manifests(ws: &Workspace<'_>, pkgs: &[&Package]) -> CargoResult<()> {
+    // HACK: Duplicate workspace migration logic between virtual manifests and real manifests to
+    // reduce multiple Migrating messages being reported for the same file to the user
+    if matches!(ws.root_maybe(), MaybePackage::Virtual(_)) {
+        // Warning: workspaces do not have an edition so this should only include changes needed by
+        // packages that preserve the behavior of the workspace on all editions
+        let highest_edition = pkgs
+            .iter()
+            .map(|p| p.manifest().edition())
+            .max()
+            .unwrap_or_default();
+        let prepare_for_edition = highest_edition.saturating_next();
+        if highest_edition == prepare_for_edition
+            || (!prepare_for_edition.is_stable() && !ws.gctx().nightly_features_allowed)
+        {
+            //
+        } else {
+            let mut manifest_mut = LocalManifest::try_new(ws.root_manifest())?;
+            let document = &mut manifest_mut.data;
+            let mut fixes = 0;
+
+            if Edition::Edition2024 <= prepare_for_edition {
+                let root = document.as_table_mut();
+
+                if let Some(workspace) = root
+                    .get_mut("workspace")
+                    .and_then(|t| t.as_table_like_mut())
+                {
+                    // strictly speaking, the edition doesn't apply to this table but it should be safe
+                    // enough
+                    fixes += rename_dep_fields_2024(workspace, "dependencies");
+                }
+            }
+
+            if 0 < fixes {
+                // HACK: As workspace migration is a special case, only report it if something
+                // happened
+                let file = ws.root_manifest();
+                let file = file.strip_prefix(ws.root()).unwrap_or(file);
+                let file = file.display();
+                ws.gctx().shell().status(
+                    "Migrating",
+                    format!("{file} from {highest_edition} edition to {prepare_for_edition}"),
+                )?;
+
+                let verb = if fixes == 1 { "fix" } else { "fixes" };
+                let msg = format!("{file} ({fixes} {verb})");
+                ws.gctx().shell().status("Fixed", msg)?;
+
+                manifest_mut.write()?;
+            }
+        }
+    }
+
     for pkg in pkgs {
         let existing_edition = pkg.manifest().edition();
         let prepare_for_edition = existing_edition.saturating_next();
@@ -249,10 +321,15 @@ fn migrate_manifests(ws: &Workspace<'_>, pkgs: &[&Package]) -> CargoResult<()> {
             format!("{file} from {existing_edition} edition to {prepare_for_edition}"),
         )?;
 
-        if Edition::Edition2024 <= prepare_for_edition {
-            let mut document = pkg.manifest().document().clone().into_mut();
-            let mut fixes = 0;
+        let mut manifest_mut = LocalManifest::try_new(pkg.manifest_path())?;
+        let document = &mut manifest_mut.data;
+        let mut fixes = 0;
 
+        let ws_original_toml = match ws.root_maybe() {
+            MaybePackage::Package(package) => package.manifest().original_toml(),
+            MaybePackage::Virtual(manifest) => manifest.original_toml(),
+        };
+        if Edition::Edition2024 <= prepare_for_edition {
             let root = document.as_table_mut();
 
             if let Some(workspace) = root
@@ -264,7 +341,6 @@ fn migrate_manifests(ws: &Workspace<'_>, pkgs: &[&Package]) -> CargoResult<()> {
                 fixes += rename_dep_fields_2024(workspace, "dependencies");
             }
 
-            fixes += add_feature_for_unused_deps(pkg, root);
             fixes += rename_table(root, "project", "package");
             if let Some(target) = root.get_mut("lib").and_then(|t| t.as_table_like_mut()) {
                 fixes += rename_target_fields_2024(target);
@@ -274,10 +350,15 @@ fn migrate_manifests(ws: &Workspace<'_>, pkgs: &[&Package]) -> CargoResult<()> {
             fixes += rename_array_of_target_fields_2024(root, "test");
             fixes += rename_array_of_target_fields_2024(root, "bench");
             fixes += rename_dep_fields_2024(root, "dependencies");
+            fixes += remove_ignored_default_features_2024(root, "dependencies", ws_original_toml);
             fixes += rename_table(root, "dev_dependencies", "dev-dependencies");
             fixes += rename_dep_fields_2024(root, "dev-dependencies");
+            fixes +=
+                remove_ignored_default_features_2024(root, "dev-dependencies", ws_original_toml);
             fixes += rename_table(root, "build_dependencies", "build-dependencies");
             fixes += rename_dep_fields_2024(root, "build-dependencies");
+            fixes +=
+                remove_ignored_default_features_2024(root, "build-dependencies", ws_original_toml);
             for target in root
                 .get_mut("target")
                 .and_then(|t| t.as_table_like_mut())
@@ -286,21 +367,31 @@ fn migrate_manifests(ws: &Workspace<'_>, pkgs: &[&Package]) -> CargoResult<()> {
                 .filter_map(|(_k, t)| t.as_table_like_mut())
             {
                 fixes += rename_dep_fields_2024(target, "dependencies");
+                fixes +=
+                    remove_ignored_default_features_2024(target, "dependencies", ws_original_toml);
                 fixes += rename_table(target, "dev_dependencies", "dev-dependencies");
                 fixes += rename_dep_fields_2024(target, "dev-dependencies");
+                fixes += remove_ignored_default_features_2024(
+                    target,
+                    "dev-dependencies",
+                    ws_original_toml,
+                );
                 fixes += rename_table(target, "build_dependencies", "build-dependencies");
                 fixes += rename_dep_fields_2024(target, "build-dependencies");
+                fixes += remove_ignored_default_features_2024(
+                    target,
+                    "build-dependencies",
+                    ws_original_toml,
+                );
             }
+        }
 
-            if 0 < fixes {
-                let verb = if fixes == 1 { "fix" } else { "fixes" };
-                let msg = format!("{file} ({fixes} {verb})");
-                ws.gctx().shell().status("Fixed", msg)?;
+        if 0 < fixes {
+            let verb = if fixes == 1 { "fix" } else { "fixes" };
+            let msg = format!("{file} ({fixes} {verb})");
+            ws.gctx().shell().status("Fixed", msg)?;
 
-                let s = document.to_string();
-                let new_contents_bytes = s.as_bytes();
-                cargo_util::paths::write_atomic(pkg.manifest_path(), new_contents_bytes)?;
-            }
+            manifest_mut.write()?;
         }
     }
 
@@ -317,6 +408,47 @@ fn rename_dep_fields_2024(parent: &mut dyn toml_edit::TableLike, dep_kind: &str)
         .filter_map(|(_k, t)| t.as_table_like_mut())
     {
         fixes += rename_table(target, "default_features", "default-features");
+    }
+    fixes
+}
+
+fn remove_ignored_default_features_2024(
+    parent: &mut dyn toml_edit::TableLike,
+    dep_kind: &str,
+    ws_original_toml: &TomlManifest,
+) -> usize {
+    let mut fixes = 0;
+    for (name_in_toml, target) in parent
+        .get_mut(dep_kind)
+        .and_then(|t| t.as_table_like_mut())
+        .iter_mut()
+        .flat_map(|t| t.iter_mut())
+        .filter_map(|(k, t)| t.as_table_like_mut().map(|t| (k, t)))
+    {
+        let name_in_toml: &str = &name_in_toml;
+        let ws_deps = ws_original_toml
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.dependencies.as_ref());
+        if let Some(ws_dep) = ws_deps.and_then(|ws_deps| ws_deps.get(name_in_toml)) {
+            if ws_dep.default_features() == Some(false) {
+                continue;
+            }
+        }
+        if target
+            .get("workspace")
+            .and_then(|i| i.as_value())
+            .and_then(|i| i.as_bool())
+            == Some(true)
+            && target
+                .get("default-features")
+                .and_then(|i| i.as_value())
+                .and_then(|i| i.as_bool())
+                == Some(false)
+        {
+            target.remove("default-features");
+            fixes += 1;
+        }
     }
     fixes
 }
@@ -356,46 +488,11 @@ fn rename_table(parent: &mut dyn toml_edit::TableLike, old: &str, new: &str) -> 
     1
 }
 
-fn add_feature_for_unused_deps(pkg: &Package, parent: &mut dyn toml_edit::TableLike) -> usize {
-    let manifest = pkg.manifest();
-
-    let activated_opt_deps = manifest
-        .resolved_toml()
-        .features()
-        .map(|map| {
-            map.values()
-                .flatten()
-                .filter_map(|f| match FeatureValue::new(InternedString::new(f)) {
-                    FeatureValue::Dep { dep_name } => Some(dep_name.as_str()),
-                    _ => None,
-                })
-                .collect::<HashSet<_>>()
-        })
-        .unwrap_or_default();
-
-    let mut fixes = 0;
-    for dep in manifest.dependencies() {
-        let dep_name_in_toml = dep.name_in_toml();
-        if dep.is_optional() && !activated_opt_deps.contains(dep_name_in_toml.as_str()) {
-            fixes += 1;
-            if let Some(features) = parent
-                .entry("features")
-                .or_insert(toml_edit::table())
-                .as_table_like_mut()
-            {
-                features.insert(
-                    dep_name_in_toml.as_str(),
-                    toml_edit::Item::Value(toml_edit::Value::Array(toml_edit::Array::from_iter(
-                        &[format!("dep:{}", dep_name_in_toml)],
-                    ))),
-                );
-            }
-        }
-    }
-    fixes
-}
-
-fn check_resolver_change(ws: &Workspace<'_>, opts: &FixOptions) -> CargoResult<()> {
+fn check_resolver_change<'gctx>(
+    ws: &Workspace<'gctx>,
+    target_data: &mut RustcTargetData<'gctx>,
+    opts: &FixOptions,
+) -> CargoResult<()> {
     let root = ws.root_maybe();
     match root {
         MaybePackage::Package(root_pkg) => {
@@ -422,23 +519,23 @@ fn check_resolver_change(ws: &Workspace<'_>, opts: &FixOptions) -> CargoResult<(
     // 2018 without `resolver` set must be V1
     assert_eq!(ws.resolve_behavior(), ResolveBehavior::V1);
     let specs = opts.compile_opts.spec.to_package_id_specs(ws)?;
-    let mut target_data =
-        RustcTargetData::new(ws, &opts.compile_opts.build_config.requested_kinds)?;
     let mut resolve_differences = |has_dev_units| -> CargoResult<(WorkspaceResolve<'_>, DiffMap)> {
+        let dry_run = false;
         let ws_resolve = ops::resolve_ws_with_opts(
             ws,
-            &mut target_data,
+            target_data,
             &opts.compile_opts.build_config.requested_kinds,
             &opts.compile_opts.cli_features,
             &specs,
             has_dev_units,
             crate::core::resolver::features::ForceAllTargets::No,
+            dry_run,
         )?;
 
         let feature_opts = FeatureOpts::new_behavior(ResolveBehavior::V2, has_dev_units);
         let v2_features = FeatureResolver::resolve(
             ws,
-            &mut target_data,
+            target_data,
             &ws_resolve.targeted_resolve,
             &ws_resolve.pkg_set,
             &opts.compile_opts.cli_features,
@@ -744,7 +841,8 @@ fn rustfix_crate(
             // We'll generate new errors below.
             file.errors_applying_fixes.clear();
         }
-        (last_output, last_made_changes) = rustfix_and_fix(&mut files, rustc, filename, gctx)?;
+        (last_output, last_made_changes) =
+            rustfix_and_fix(&mut files, rustc, filename, args, gctx)?;
         if current_iteration == 0 {
             first_output = Some(last_output.clone());
         }
@@ -801,6 +899,7 @@ fn rustfix_and_fix(
     files: &mut HashMap<String, FixedFile>,
     rustc: &ProcessBuilder,
     filename: &Path,
+    args: &FixArgs,
     gctx: &GlobalContext,
 ) -> CargoResult<(Output, bool)> {
     // If not empty, filter by these lints.
@@ -865,9 +964,16 @@ fn rustfix_and_fix(
             continue;
         };
 
+        let file_path = Path::new(&file_name);
         // Do not write into registry cache. See rust-lang/cargo#9857.
-        if Path::new(&file_name).starts_with(home_path) {
+        if file_path.starts_with(home_path) {
             continue;
+        }
+        // Do not write into standard library source. See rust-lang/cargo#9857.
+        if let Some(sysroot) = args.sysroot.as_deref() {
+            if file_path.starts_with(sysroot) {
+                continue;
+            }
         }
 
         if !file_names.clone().all(|f| f == &file_name) {
@@ -915,23 +1021,19 @@ fn rustfix_and_fix(
         });
         let mut fixed = CodeFix::new(&code);
 
-        let mut already_applied = HashSet::new();
         for suggestion in suggestions.iter().rev() {
-            // This assumes that if any of the machine applicable fixes in
-            // a diagnostic suggestion is a duplicate, we should see the
-            // entire suggestion as a duplicate.
-            if suggestion
-                .solutions
-                .iter()
-                .any(|sol| !already_applied.insert(sol))
-            {
-                continue;
-            }
+            // As mentioned above in `rustfix_crate`,
+            // we don't immediately warn about suggestions that fail to apply here,
+            // and instead we save them off for later processing.
+            //
+            // However, we don't bother reporting conflicts that exactly match prior replacements.
+            // This is currently done to reduce noise for things like rust-lang/rust#51211,
+            // although it may be removed if that's fixed deeper in the compiler.
             match fixed.apply(suggestion) {
                 Ok(()) => fixed_file.fixes_applied += 1,
-                // As mentioned above in `rustfix_crate`, we don't immediately
-                // warn about suggestions that fail to apply here, and instead
-                // we save them off for later processing.
+                Err(rustfix::Error::AlreadyReplaced {
+                    is_identical: true, ..
+                }) => continue,
                 Err(e) => fixed_file.errors_applying_fixes.push(e.to_string()),
             }
         }
@@ -1025,6 +1127,8 @@ struct FixArgs {
     other: Vec<OsString>,
     /// Path to the `rustc` executable.
     rustc: PathBuf,
+    /// Path to host sysroot.
+    sysroot: Option<PathBuf>,
 }
 
 impl FixArgs {
@@ -1096,6 +1200,11 @@ impl FixArgs {
                 .saturating_next()
         });
 
+        // ALLOWED: For the internal mechanism of `cargo fix` only.
+        // Shouldn't be set directly by anyone.
+        #[allow(clippy::disallowed_methods)]
+        let sysroot = env::var_os(SYSROOT_INTERNAL).map(PathBuf::from);
+
         Ok(FixArgs {
             file,
             prepare_for_edition,
@@ -1103,6 +1212,7 @@ impl FixArgs {
             enabled_edition,
             other,
             rustc,
+            sysroot,
         })
     }
 

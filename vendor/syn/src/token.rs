@@ -501,6 +501,7 @@ macro_rules! define_delimiters {
 
             impl $name {
                 #[cfg(feature = "printing")]
+                #[cfg_attr(docsrs, doc(cfg(feature = "printing")))]
                 pub fn surround<F>(&self, tokens: &mut TokenStream, f: F)
                 where
                     F: FnOnce(&mut TokenStream),
@@ -630,6 +631,7 @@ impl Hash for Group {
 
 impl Group {
     #[cfg(feature = "printing")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "printing")))]
     pub fn surround<F>(&self, tokens: &mut TokenStream, f: F)
     where
         F: FnOnce(&mut TokenStream),
@@ -721,6 +723,7 @@ define_keywords! {
     "override"    pub struct Override
     "priv"        pub struct Priv
     "pub"         pub struct Pub
+    "raw"         pub struct Raw
     "ref"         pub struct Ref
     "return"      pub struct Return
     "Self"        pub struct SelfType
@@ -899,6 +902,7 @@ macro_rules! Token {
     [override]    => { $crate::token::Override };
     [priv]        => { $crate::token::Priv };
     [pub]         => { $crate::token::Pub };
+    [raw]         => { $crate::token::Raw };
     [ref]         => { $crate::token::Ref };
     [return]      => { $crate::token::Return };
     [Self]        => { $crate::token::SelfType };

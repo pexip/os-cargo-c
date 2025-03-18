@@ -322,11 +322,11 @@ int ClientHandler::write_tls() {
 int ClientHandler::read_quic(const UpstreamAddr *faddr,
                              const Address &remote_addr,
                              const Address &local_addr,
-                             const ngtcp2_pkt_info &pi, const uint8_t *data,
-                             size_t datalen) {
+                             const ngtcp2_pkt_info &pi,
+                             std::span<const uint8_t> data) {
   auto upstream = static_cast<Http3Upstream *>(upstream_.get());
 
-  return upstream->on_read(faddr, remote_addr, local_addr, pi, data, datalen);
+  return upstream->on_read(faddr, remote_addr, local_addr, pi, data);
 }
 
 int ClientHandler::write_quic() { return upstream_->on_write(); }
@@ -433,32 +433,31 @@ int ClientHandler::upstream_http1_connhd_read() {
 ClientHandler::ClientHandler(Worker *worker, int fd, SSL *ssl,
                              const StringRef &ipaddr, const StringRef &port,
                              int family, const UpstreamAddr *faddr)
-    : // We use balloc_ for TLS session ID (64), ipaddr (IPv6) (39),
-      // port (5), forwarded-for (IPv6) (41), alpn (5), proxyproto
-      // ipaddr (15), proxyproto port (5), sni (32, estimated).  we
-      // need terminal NULL byte for each.  We also require 8 bytes
-      // header for each allocation.  We align at 16 bytes boundary,
-      // so the required space is 64 + 48 + 16 + 48 + 16 + 16 + 16 +
-      // 32 + 8 + 8 * 8 = 328.
-      balloc_(512, 512),
-      rb_(worker->get_mcpool()),
-      conn_(worker->get_loop(), fd, ssl, worker->get_mcpool(),
-            get_config()->conn.upstream.timeout.write,
-            get_config()->conn.upstream.timeout.idle,
-            get_config()->conn.upstream.ratelimit.write,
-            get_config()->conn.upstream.ratelimit.read, writecb, readcb,
-            timeoutcb, this, get_config()->tls.dyn_rec.warmup_threshold,
-            get_config()->tls.dyn_rec.idle_timeout,
-            faddr->quic ? Proto::HTTP3 : Proto::NONE),
-      ipaddr_(make_string_ref(balloc_, ipaddr)),
-      port_(make_string_ref(balloc_, port)),
-      faddr_(faddr),
-      worker_(worker),
-      left_connhd_len_(NGHTTP2_CLIENT_MAGIC_LEN),
-      affinity_hash_(0),
-      should_close_after_write_(false),
-      affinity_hash_computed_(false) {
-
+  : // We use balloc_ for TLS session ID (64), ipaddr (IPv6) (39),
+    // port (5), forwarded-for (IPv6) (41), alpn (5), proxyproto
+    // ipaddr (15), proxyproto port (5), sni (32, estimated).  we
+    // need terminal NULL byte for each.  We also require 8 bytes
+    // header for each allocation.  We align at 16 bytes boundary,
+    // so the required space is 64 + 48 + 16 + 48 + 16 + 16 + 16 +
+    // 32 + 8 + 8 * 8 = 328.
+    balloc_(512, 512),
+    rb_(worker->get_mcpool()),
+    conn_(worker->get_loop(), fd, ssl, worker->get_mcpool(),
+          get_config()->conn.upstream.timeout.write,
+          get_config()->conn.upstream.timeout.idle,
+          get_config()->conn.upstream.ratelimit.write,
+          get_config()->conn.upstream.ratelimit.read, writecb, readcb,
+          timeoutcb, this, get_config()->tls.dyn_rec.warmup_threshold,
+          get_config()->tls.dyn_rec.idle_timeout,
+          faddr->quic ? Proto::HTTP3 : Proto::NONE),
+    ipaddr_(make_string_ref(balloc_, ipaddr)),
+    port_(make_string_ref(balloc_, port)),
+    faddr_(faddr),
+    worker_(worker),
+    left_connhd_len_(NGHTTP2_CLIENT_MAGIC_LEN),
+    affinity_hash_(0),
+    should_close_after_write_(false),
+    affinity_hash_computed_(false) {
   ++worker_->get_worker_stat()->num_connections;
 
   ev_timer_init(&reneg_shutdown_timer_, shutdowncb, 0., 0.);
@@ -492,13 +491,13 @@ ClientHandler::ClientHandler(Worker *worker, int fd, SSL *ssl,
       auto len = SHRPX_OBFUSCATED_NODE_LENGTH + 1;
       // 1 for terminating NUL.
       auto buf = make_byte_ref(balloc_, len + 1);
-      auto p = buf.base;
+      auto p = std::begin(buf);
       *p++ = '_';
       p = util::random_alpha_digit(p, p + SHRPX_OBFUSCATED_NODE_LENGTH,
                                    worker_->get_randgen());
       *p = '\0';
 
-      forwarded_for_ = StringRef{buf.base, p};
+      forwarded_for_ = StringRef{std::span{std::begin(buf), p}};
     } else {
       init_forwarded_for(family, ipaddr_);
     }
@@ -511,13 +510,13 @@ void ClientHandler::init_forwarded_for(int family, const StringRef &ipaddr) {
     auto len = 2 + ipaddr.size();
     // 1 for terminating NUL.
     auto buf = make_byte_ref(balloc_, len + 1);
-    auto p = buf.base;
+    auto p = std::begin(buf);
     *p++ = '[';
     p = std::copy(std::begin(ipaddr), std::end(ipaddr), p);
     *p++ = ']';
     *p = '\0';
 
-    forwarded_for_ = StringRef{buf.base, p};
+    forwarded_for_ = StringRef{std::span{std::begin(buf), p}};
   } else {
     // family == AF_INET or family == AF_UNIX
     forwarded_for_ = ipaddr;
@@ -535,7 +534,7 @@ void ClientHandler::setup_upstream_io_callback() {
     // upgraded to HTTP/2 through HTTP Upgrade or direct HTTP/2
     // connection.
     upstream_ = std::make_unique<HttpsUpstream>(this);
-    alpn_ = StringRef::from_lit("http/1.1");
+    alpn_ = "http/1.1"_sr;
     read_ = &ClientHandler::read_clear;
     write_ = &ClientHandler::write_clear;
     on_read_ = &ClientHandler::upstream_http1_connhd_read;
@@ -545,7 +544,7 @@ void ClientHandler::setup_upstream_io_callback() {
 
 #ifdef ENABLE_HTTP3
 void ClientHandler::setup_http3_upstream(
-    std::unique_ptr<Http3Upstream> &&upstream) {
+  std::unique_ptr<Http3Upstream> &&upstream) {
   upstream_ = std::move(upstream);
   write_ = &ClientHandler::write_quic;
 
@@ -629,7 +628,7 @@ int ClientHandler::validate_next_proto() {
       CLOG(INFO, this) << "No protocol negotiated. Fallback to HTTP/1.1";
     }
 
-    proto = StringRef::from_lit("http/1.1");
+    proto = "http/1.1"_sr;
   }
 
   if (!tls::in_proto_list(get_config()->tls.alpn_list, proto)) {
@@ -657,9 +656,9 @@ int ClientHandler::validate_next_proto() {
     return 0;
   }
 
-  if (proto == StringRef::from_lit("http/1.1")) {
+  if (proto == "http/1.1"_sr) {
     upstream_ = std::make_unique<HttpsUpstream>(this);
-    alpn_ = StringRef::from_lit("http/1.1");
+    alpn_ = "http/1.1"_sr;
 
     // At this point, input buffer is already filled with some bytes.
     // The read callback is not called until new data come. So consume
@@ -702,7 +701,7 @@ void ClientHandler::set_should_close_after_write(bool f) {
 }
 
 void ClientHandler::pool_downstream_connection(
-    std::unique_ptr<DownstreamConnection> dconn) {
+  std::unique_ptr<DownstreamConnection> dconn) {
   if (!dconn->poolable()) {
     return;
   }
@@ -741,7 +740,7 @@ uint32_t compute_affinity_from_ip(const StringRef &ip) {
 } // namespace
 
 Http2Session *ClientHandler::get_http2_session(
-    const std::shared_ptr<DownstreamAddrGroup> &group, DownstreamAddr *addr) {
+  const std::shared_ptr<DownstreamAddrGroup> &group, DownstreamAddr *addr) {
   auto &shared_addr = group->shared_addr;
 
   if (LOG_ENABLED(INFO)) {
@@ -755,8 +754,8 @@ Http2Session *ClientHandler::get_http2_session(
     if (session->max_concurrency_reached(0)) {
       if (LOG_ENABLED(INFO)) {
         CLOG(INFO, this)
-            << "Maximum streams have been reached for Http2Session(" << session
-            << ").  Skip it";
+          << "Maximum streams have been reached for Http2Session(" << session
+          << ").  Skip it";
       }
 
       session->remove_from_freelist();
@@ -802,8 +801,7 @@ uint32_t ClientHandler::get_affinity_cookie(Downstream *downstream,
 
   auto d = std::uniform_int_distribution<uint32_t>(1);
   auto rh = d(worker_->get_randgen());
-  h = util::hash32(StringRef{reinterpret_cast<uint8_t *>(&rh),
-                             reinterpret_cast<uint8_t *>(&rh) + sizeof(rh)});
+  h = util::hash32(StringRef{reinterpret_cast<char *>(&rh), sizeof(rh)});
 
   downstream->renew_affinity_cookie(h);
 
@@ -812,9 +810,9 @@ uint32_t ClientHandler::get_affinity_cookie(Downstream *downstream,
 
 namespace {
 void reschedule_addr(
-    std::priority_queue<DownstreamAddrEntry, std::vector<DownstreamAddrEntry>,
-                        DownstreamAddrEntryGreater> &pq,
-    DownstreamAddr *addr) {
+  std::priority_queue<DownstreamAddrEntry, std::vector<DownstreamAddrEntry>,
+                      DownstreamAddrEntryGreater> &pq,
+  DownstreamAddr *addr) {
   auto penalty = MAX_DOWNSTREAM_ADDR_WEIGHT + addr->pending_penalty;
   addr->cycle += penalty / addr->weight;
   addr->pending_penalty = penalty % addr->weight;
@@ -826,9 +824,9 @@ void reschedule_addr(
 
 namespace {
 void reschedule_wg(
-    std::priority_queue<WeightGroupEntry, std::vector<WeightGroupEntry>,
-                        WeightGroupEntryGreater> &pq,
-    WeightGroup *wg) {
+  std::priority_queue<WeightGroupEntry, std::vector<WeightGroupEntry>,
+                      WeightGroupEntryGreater> &pq,
+  WeightGroup *wg) {
   auto penalty = MAX_DOWNSTREAM_ADDR_WEIGHT + wg->pending_penalty;
   wg->cycle += penalty / wg->weight;
   wg->pending_penalty = penalty % wg->weight;
@@ -879,15 +877,15 @@ DownstreamAddr *ClientHandler::get_downstream_addr(int &err,
     const auto &affinity_hash = shared_addr->affinity_hash;
 
     auto it = std::lower_bound(
-        std::begin(affinity_hash), std::end(affinity_hash), hash,
-        [](const AffinityHash &lhs, uint32_t rhs) { return lhs.hash < rhs; });
+      std::begin(affinity_hash), std::end(affinity_hash), hash,
+      [](const AffinityHash &lhs, uint32_t rhs) { return lhs.hash < rhs; });
 
     if (it == std::end(affinity_hash)) {
       it = std::begin(affinity_hash);
     }
 
     auto aff_idx =
-        static_cast<size_t>(std::distance(std::begin(affinity_hash), it));
+      static_cast<size_t>(std::distance(std::begin(affinity_hash), it));
     auto idx = (*it).idx;
     auto addr = &shared_addr->addrs[idx];
 
@@ -947,8 +945,8 @@ DownstreamAddr *ClientHandler::get_downstream_addr(int &err,
 }
 
 DownstreamAddr *ClientHandler::get_downstream_addr_strict_affinity(
-    int &err, const std::shared_ptr<SharedDownstreamAddr> &shared_addr,
-    Downstream *downstream) {
+  int &err, const std::shared_ptr<SharedDownstreamAddr> &shared_addr,
+  Downstream *downstream) {
   const auto &affinity_hash = shared_addr->affinity_hash;
 
   auto h = downstream->find_affinity_cookie(shared_addr->affinity.cookie.name);
@@ -963,8 +961,7 @@ DownstreamAddr *ClientHandler::get_downstream_addr_strict_affinity(
   } else {
     auto d = std::uniform_int_distribution<uint32_t>(1);
     auto rh = d(worker_->get_randgen());
-    h = util::hash32(StringRef{reinterpret_cast<uint8_t *>(&rh),
-                               reinterpret_cast<uint8_t *>(&rh) + sizeof(rh)});
+    h = util::hash32(StringRef{reinterpret_cast<char *>(&rh), sizeof(rh)});
   }
 
   // Client is not bound to a particular backend, or the bound backend
@@ -973,15 +970,15 @@ DownstreamAddr *ClientHandler::get_downstream_addr_strict_affinity(
   // It is preferable because multiple concurrent requests with the
   // stale cookie might be in-flight.
   auto it = std::lower_bound(
-      std::begin(affinity_hash), std::end(affinity_hash), h,
-      [](const AffinityHash &lhs, uint32_t rhs) { return lhs.hash < rhs; });
+    std::begin(affinity_hash), std::end(affinity_hash), h,
+    [](const AffinityHash &lhs, uint32_t rhs) { return lhs.hash < rhs; });
 
   if (it == std::end(affinity_hash)) {
     it = std::begin(affinity_hash);
   }
 
   auto aff_idx =
-      static_cast<size_t>(std::distance(std::begin(affinity_hash), it));
+    static_cast<size_t>(std::distance(std::begin(affinity_hash), it));
   auto idx = (*it).idx;
   auto addr = &shared_addr->addrs[idx];
 
@@ -1115,7 +1112,7 @@ ClientHandler::get_downstream_connection(int &err, Downstream *downstream) {
     if (worker_->get_connect_blocker()->blocked()) {
       if (LOG_ENABLED(INFO)) {
         DCLOG(INFO, this)
-            << "Worker wide backend connection was blocked temporarily";
+          << "Worker wide backend connection was blocked temporarily";
       }
       return nullptr;
     }
@@ -1148,7 +1145,7 @@ SSL *ClientHandler::get_ssl() const { return conn_.tls.ssl; }
 
 void ClientHandler::direct_http2_upgrade() {
   upstream_ = std::make_unique<Http2Upstream>(this);
-  alpn_ = StringRef::from_lit(NGHTTP2_CLEARTEXT_PROTO_VERSION_ID);
+  alpn_ = NGHTTP2_CLEARTEXT_PROTO_VERSION_ID ""_sr;
   on_read_ = &ClientHandler::upstream_read;
   write_ = &ClientHandler::write_clear;
 }
@@ -1173,17 +1170,16 @@ int ClientHandler::perform_http2_upgrade(HttpsUpstream *http) {
   upstream_.release();
   // TODO We might get other version id in HTTP2-settings, if we
   // support aliasing for h2, but we just use library default for now.
-  alpn_ = StringRef::from_lit(NGHTTP2_CLEARTEXT_PROTO_VERSION_ID);
+  alpn_ = NGHTTP2_CLEARTEXT_PROTO_VERSION_ID ""_sr;
   on_read_ = &ClientHandler::upstream_http2_connhd_read;
   write_ = &ClientHandler::write_clear;
 
   input->remove(*output, input->rleft());
 
-  constexpr auto res =
-      StringRef::from_lit("HTTP/1.1 101 Switching Protocols\r\n"
-                          "Connection: Upgrade\r\n"
-                          "Upgrade: " NGHTTP2_CLEARTEXT_PROTO_VERSION_ID "\r\n"
-                          "\r\n");
+  constexpr auto res = "HTTP/1.1 101 Switching Protocols\r\n"
+                       "Connection: Upgrade\r\n"
+                       "Upgrade: " NGHTTP2_CLEARTEXT_PROTO_VERSION_ID "\r\n"
+                       "\r\n"_sr;
 
   output->append(res);
   upstream_ = std::move(upstream);
@@ -1196,9 +1192,9 @@ bool ClientHandler::get_http2_upgrade_allowed() const { return !conn_.tls.ssl; }
 
 StringRef ClientHandler::get_upstream_scheme() const {
   if (conn_.tls.ssl) {
-    return StringRef::from_lit("https");
+    return "https"_sr;
   } else {
-    return StringRef::from_lit("http");
+    return "http"_sr;
   }
 }
 
@@ -1218,18 +1214,18 @@ void ClientHandler::write_accesslog(Downstream *downstream) {
   }
 
   upstream_accesslog(
-      config->logging.access.format,
-      LogSpec{
-          downstream,
-          ipaddr_,
-          alpn_,
-          sni_,
-          conn_.tls.ssl,
-          std::chrono::high_resolution_clock::now(), // request_end_time
-          port_,
-          faddr_->port,
-          config->pid,
-      });
+    config->logging.access.format,
+    LogSpec{
+      downstream,
+      ipaddr_,
+      alpn_,
+      sni_,
+      conn_.tls.ssl,
+      std::chrono::high_resolution_clock::now(), // request_end_time
+      port_,
+      faddr_->port,
+      config->pid,
+    });
 }
 
 ClientHandler::ReadBuf *ClientHandler::get_rb() { return &rb_; }
@@ -1298,11 +1294,11 @@ int ClientHandler::on_proxy_protocol_finish() {
 namespace {
 // PROXY-protocol v2 header signature
 constexpr uint8_t PROXY_PROTO_V2_SIG[] =
-    "\x0D\x0A\x0D\x0A\x00\x0D\x0A\x51\x55\x49\x54\x0A";
+  "\x0D\x0A\x0D\x0A\x00\x0D\x0A\x51\x55\x49\x54\x0A";
 
 // PROXY-protocol v2 header length
 constexpr size_t PROXY_PROTO_V2_HDLEN =
-    str_size(PROXY_PROTO_V2_SIG) + /* ver_cmd(1) + fam(1) + len(2) = */ 4;
+  str_size(PROXY_PROTO_V2_SIG) + /* ver_cmd(1) + fam(1) + len(2) = */ 4;
 } // namespace
 
 // http://www.haproxy.org/download/1.5/doc/proxy-protocol.txt
@@ -1324,14 +1320,14 @@ int ClientHandler::proxy_protocol_read() {
   // NULL character really destroys functions which expects NULL
   // terminated string.  We won't expect it in PROXY protocol line, so
   // find it here.
-  auto chrs = std::array<char, 2>{'\n', '\0'};
+  auto chrs = std::to_array({'\n', '\0'});
 
   constexpr size_t MAX_PROXY_LINELEN = 107;
 
   auto bufend = rb_.pos() + std::min(MAX_PROXY_LINELEN, rb_.rleft());
 
   auto end =
-      std::find_first_of(rb_.pos(), bufend, std::begin(chrs), std::end(chrs));
+    std::find_first_of(rb_.pos(), bufend, std::begin(chrs), std::end(chrs));
 
   if (end == bufend || *end == '\0' || end == rb_.pos() || *(end - 1) != '\r') {
     if (LOG_ENABLED(INFO)) {
@@ -1342,7 +1338,7 @@ int ClientHandler::proxy_protocol_read() {
 
   --end;
 
-  constexpr auto HEADER = StringRef::from_lit("PROXY ");
+  constexpr auto HEADER = "PROXY "_sr;
 
   if (static_cast<size_t>(end - rb_.pos()) < HEADER.size()) {
     if (LOG_ENABLED(INFO)) {
@@ -1351,7 +1347,7 @@ int ClientHandler::proxy_protocol_read() {
     return -1;
   }
 
-  if (!util::streq(HEADER, StringRef{rb_.pos(), HEADER.size()})) {
+  if (HEADER != StringRef{rb_.pos(), HEADER.size()}) {
     if (LOG_ENABLED(INFO)) {
       CLOG(INFO, this) << "PROXY-protocol-v1: Bad PROXY protocol version 1 ID";
     }
@@ -1399,7 +1395,7 @@ int ClientHandler::proxy_protocol_read() {
       }
       return -1;
     }
-    if (!util::streq_l("UNKNOWN", rb_.pos(), 7)) {
+    if ("UNKNOWN"_sr != StringRef{rb_.pos(), 7}) {
       if (LOG_ENABLED(INFO)) {
         CLOG(INFO, this) << "PROXY-protocol-v1: Unknown INET protocol family";
       }
@@ -1482,9 +1478,10 @@ int ClientHandler::proxy_protocol_read() {
 
   rb_.drain(end + 2 - rb_.pos());
 
-  ipaddr_ =
-      make_string_ref(balloc_, StringRef{src_addr, src_addr + src_addrlen});
-  port_ = make_string_ref(balloc_, StringRef{src_port, src_port + src_portlen});
+  ipaddr_ = make_string_ref(
+    balloc_, StringRef{src_addr, static_cast<size_t>(src_addrlen)});
+  port_ = make_string_ref(
+    balloc_, StringRef{src_port, static_cast<size_t>(src_portlen)});
 
   if (LOG_ENABLED(INFO)) {
     CLOG(INFO, this) << "PROXY-protocol-v1: Finished, " << (rb_.pos() - first)
@@ -1544,15 +1541,15 @@ int ClientHandler::proxy_protocol_v2_read() {
   if (rb_.last() - p < len) {
     if (LOG_ENABLED(INFO)) {
       CLOG(INFO, this)
-          << "PROXY-protocol-v2: Prematurely truncated header block; require "
-          << len << " bytes, " << rb_.last() - p << " bytes left";
+        << "PROXY-protocol-v2: Prematurely truncated header block; require "
+        << len << " bytes, " << rb_.last() - p << " bytes left";
     }
     return -1;
   }
 
   int family;
   std::array<char, std::max(INET_ADDRSTRLEN, INET6_ADDRSTRLEN)> src_addr,
-      dst_addr;
+    dst_addr;
   size_t addrlen;
 
   switch (fam) {
@@ -1626,7 +1623,7 @@ int ClientHandler::proxy_protocol_v2_read() {
   if (inet_ntop(family, p, dst_addr.data(), dst_addr.size()) == nullptr) {
     if (LOG_ENABLED(INFO)) {
       CLOG(INFO, this)
-          << "PROXY-protocol-v2: Unable to parse destination address";
+        << "PROXY-protocol-v2: Unable to parse destination address";
     }
     return -1;
   }
@@ -1677,7 +1674,7 @@ StringRef ClientHandler::get_forwarded_for() const { return forwarded_for_; }
 
 const UpstreamAddr *ClientHandler::get_upstream_addr() const { return faddr_; }
 
-Connection *ClientHandler::get_connection() { return &conn_; };
+Connection *ClientHandler::get_connection() { return &conn_; }
 
 void ClientHandler::set_tls_sni(const StringRef &sni) {
   sni_ = make_string_ref(balloc_, sni);

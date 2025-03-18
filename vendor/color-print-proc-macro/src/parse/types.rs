@@ -21,9 +21,9 @@ pub struct ErrorDetail<'a> {
 }
 
 impl<'a> ErrorDetail<'a> {
-    pub fn new(input: &'a str, message: &str) -> Self {
+    pub fn new(input: &'a str, message: impl Into<String>) -> Self {
         let input = &input[..input.len().min(1)];
-        Self { input, message: message.to_owned() }
+        Self { input, message: message.into() }
     }
 }
 

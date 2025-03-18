@@ -23,13 +23,7 @@ pub use events_type::{Events, FrontMatterEvents};
 mod comment;
 mod error;
 ///
-#[allow(clippy::empty_docs)]
 pub mod section;
-
-///
-#[allow(clippy::empty_docs)]
-mod key;
-pub use key::{parse_unvalidated as key, Key};
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -55,7 +49,7 @@ pub enum Event<'a> {
     /// name and `origin` as subsection name.
     SectionHeader(section::Header<'a>),
     /// A name to a value in a section, like `url` in `remote.origin.url`.
-    SectionKey(section::Key<'a>),
+    SectionValueName(section::ValueName<'a>),
     /// A completed value. This may be any single-line string, including the empty string
     /// if an implicit boolean value is used.
     /// Note that these values may contain spaces and any special character. This value is
@@ -64,7 +58,7 @@ pub enum Event<'a> {
     Value(Cow<'a, BStr>),
     /// Represents any token used to signify a newline character. On Unix
     /// platforms, this is typically just `\n`, but can be any valid newline
-    /// sequence. Multiple newlines (such as `\n\n`) will be merged as a single
+    /// *sequence*. Multiple newlines (such as `\n\n`) will be merged as a single
     /// newline event containing a string of multiple newline characters.
     Newline(Cow<'a, BStr>),
     /// Any value that isn't completed. This occurs when the value is continued

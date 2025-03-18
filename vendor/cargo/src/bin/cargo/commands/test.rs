@@ -41,9 +41,9 @@ pub fn cli() -> Command {
             "Test only the specified example",
             "Test all examples",
             "Test only the specified test target",
-            "Test all test targets",
+            "Test all targets that have `test = true` set",
             "Test only the specified bench target",
-            "Test all bench targets",
+            "Test all targets that have `bench = true` set",
             "Test all targets (does not include doctests)",
         )
         .arg(
@@ -60,6 +60,7 @@ pub fn cli() -> Command {
         .arg_unit_graph()
         .arg_timings()
         .arg_manifest_path()
+        .arg_lockfile_path()
         .arg_ignore_rust_version()
         .after_help(color_print::cstr!(
             "Run `<cyan,bold>cargo help test</>` for more detailed information.\n\
@@ -74,7 +75,7 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
         args.compile_options(gctx, CompileMode::Test, Some(&ws), ProfileChecking::Custom)?;
 
     compile_opts.build_config.requested_profile =
-        args.get_profile_name(gctx, "test", ProfileChecking::Custom)?;
+        args.get_profile_name("test", ProfileChecking::Custom)?;
 
     // `TESTNAME` is actually an argument of the test binary, but it's
     // important, so we explicitly mention it and reconfigure.

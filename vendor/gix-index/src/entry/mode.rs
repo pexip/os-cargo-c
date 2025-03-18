@@ -69,11 +69,12 @@ impl Mode {
 
 impl From<gix_object::tree::EntryMode> for Mode {
     fn from(value: gix_object::tree::EntryMode) -> Self {
-        Self::from_bits_truncate(value.0 as u32)
+        Self::from_bits_truncate(u32::from(value.0))
     }
 }
 
 /// A change of a [`Mode`].
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Change {
     /// The type of mode changed, like symlink => file.
     Type {

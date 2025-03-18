@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2018-2023 The orion Developers
+// Copyright (c) 2018-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,9 +39,8 @@ impl fmt::Debug for UnknownCryptoError {
     }
 }
 
-#[cfg(feature = "safe_api")]
-impl std::error::Error for UnknownCryptoError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for UnknownCryptoError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         None
     }
 }
@@ -82,10 +81,9 @@ fn test_unknown_crypto_error_debug_display() {
 #[cfg(feature = "safe_api")]
 // format! is only available with std
 fn test_unknown_crypto_from_getrandom() {
-    use core::num::NonZeroU32;
     // Choose some random error code.
-    let err_code = NonZeroU32::new(12).unwrap();
-    let err_foreign: getrandom::Error = getrandom::Error::from(err_code);
+    let err_code: u16 = 12;
+    let err_foreign: getrandom::Error = getrandom::Error::new_custom(err_code);
 
     // Tests Debug impl through "{:?}"
     let err = format!("{:?}", UnknownCryptoError::from(err_foreign));
@@ -96,9 +94,8 @@ fn test_unknown_crypto_from_getrandom() {
 }
 
 #[test]
-#[cfg(feature = "safe_api")]
 fn test_source() {
-    use std::error::Error;
+    use core::error::Error;
     assert!(UnknownCryptoError.source().is_none());
 }
 

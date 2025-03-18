@@ -58,6 +58,16 @@ cdef extern from *:
   cdef struct ConditionalField:
     int32_t field;
 
+  cdef struct Normal:
+    int32_t x;
+    float y;
+
+  IF PLATFORM_WIN:
+    extern int32_t global_array_with_different_sizes[2];
+
+  IF PLATFORM_UNIX:
+    extern int32_t global_array_with_different_sizes[1];
+
   IF (PLATFORM_UNIX and X11):
     void root(FooHandle a, C c);
 
@@ -65,3 +75,9 @@ cdef extern from *:
     void root(BarHandle a, C c);
 
   void cond(ConditionalField a);
+
+  IF PLATFORM_WIN:
+    extern int32_t foo();
+
+  IF PLATFORM_WIN:
+    extern void bar(Normal a);

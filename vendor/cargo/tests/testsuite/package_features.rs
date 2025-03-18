@@ -1,9 +1,12 @@
 //! Tests for feature selection on the command-line.
 
-use super::features2::switch_to_resolver_2;
-use cargo_test_support::registry::{Dependency, Package};
-use cargo_test_support::{basic_manifest, project};
 use std::fmt::Write;
+
+use cargo_test_support::prelude::*;
+use cargo_test_support::registry::{Dependency, Package};
+use cargo_test_support::{basic_manifest, project, str};
+
+use super::features2::switch_to_resolver_2;
 
 #[cargo_test]
 fn virtual_no_default_features() {
@@ -56,37 +59,66 @@ fn virtual_no_default_features() {
         .build();
 
     p.cargo("check --no-default-features")
-        .with_stderr_unordered(
-            "\
-[UPDATING] [..]
-[LOCKING] 3 packages to latest compatible versions
-[CHECKING] a v0.1.0 [..]
-[CHECKING] b v0.1.0 [..]
-[FINISHED] [..]
-",
+        .with_stderr_data(
+            str![[r#"
+[UPDATING] `dummy-registry` index
+[LOCKING] 1 package to latest compatible version
+[CHECKING] a v0.1.0 ([ROOT]/foo/a)
+[CHECKING] b v0.1.0 ([ROOT]/foo/b)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]]
+            .unordered(),
         )
         .run();
 
     p.cargo("check --features foo")
         .with_status(101)
-        .with_stderr(
-            "[ERROR] none of the selected packages contains these features: foo, did you mean: f1?",
-        )
+        .with_stderr_data(str![[r#"
+[ERROR] none of the selected packages contains this feature: foo
+selected packages: a, b
+[HELP] there is a similarly named feature: f1
+
+"#]])
         .run();
 
     p.cargo("check --features a/dep1,b/f1,b/f2,f2")
         .with_status(101)
-        .with_stderr("[ERROR] none of the selected packages contains these features: b/f2, f2, did you mean: f1?")
+        .with_stderr_data(str![[r#"
+[ERROR] none of the selected packages contains these features: b/f2, f2
+selected packages: a, b
+[HELP] there is a similarly named feature: f1
+
+"#]])
         .run();
 
     p.cargo("check --features a/dep,b/f1,b/f2,f2")
         .with_status(101)
-        .with_stderr("[ERROR] none of the selected packages contains these features: a/dep, b/f2, f2, did you mean: a/dep1, f1?")
+        .with_stderr_data(str![[r#"
+[ERROR] none of the selected packages contains these features: a/dep, b/f2, f2
+selected packages: a, b
+[HELP] there are similarly named features: a/dep1, f1
+
+"#]])
         .run();
 
     p.cargo("check --features a/dep,a/dep1")
         .with_status(101)
-        .with_stderr("[ERROR] none of the selected packages contains these features: a/dep, did you mean: b/f1?")
+        .with_stderr_data(str![[r#"
+[ERROR] none of the selected packages contains this feature: a/dep
+selected packages: a, b
+[HELP] there is a similarly named feature: b/f1
+
+"#]])
+        .run();
+
+    p.cargo("check -p b --features=dep1")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] the package 'b' does not contain this feature: dep1
+[HELP] package with the missing feature: a
+
+"#]])
         .run();
 }
 
@@ -110,9 +142,11 @@ fn virtual_typo_member_feature() {
         .build()
         .cargo("check --features a/deny-warning")
         .with_status(101)
-        .with_stderr(
-            "[ERROR] none of the selected packages contains these features: a/deny-warning, did you mean: a/deny-warnings?",
-        )
+        .with_stderr_data(str![[r#"
+[ERROR] the package 'a' does not contain this feature: a/deny-warning
+[HELP] there is a similarly named feature: a/deny-warnings
+
+"#]])
         .run();
 }
 
@@ -151,13 +185,14 @@ fn virtual_features() {
         .build();
 
     p.cargo("check --features f1")
-        .with_stderr_unordered(
-            "\
-[LOCKING] 2 packages to latest compatible versions
-[CHECKING] a [..]
-[CHECKING] b [..]
-[FINISHED] [..]
-",
+        .with_stderr_data(
+            str![[r#"
+[CHECKING] a v0.1.0 ([ROOT]/foo/a)
+[CHECKING] b v0.1.0 ([ROOT]/foo/b)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]]
+            .unordered(),
         )
         .run();
 }
@@ -189,9 +224,9 @@ fn virtual_with_specific() {
         .file(
             "a/src/lib.rs",
             r#"
-            #[cfg(not_feature = "f1")]
+            #[cfg(not(feature = "f1"))]
             compile_error!{"f1 is missing"}
-            #[cfg(not_feature = "f2")]
+            #[cfg(not(feature = "f2"))]
             compile_error!{"f2 is missing"}
             "#,
         )
@@ -211,22 +246,23 @@ fn virtual_with_specific() {
         .file(
             "b/src/lib.rs",
             r#"
-            #[cfg(not_feature = "f2")]
+            #[cfg(not(feature = "f2"))]
             compile_error!{"f2 is missing"}
-            #[cfg(not_feature = "f3")]
+            #[cfg(not(feature = "f3"))]
             compile_error!{"f3 is missing"}
             "#,
         )
         .build();
 
     p.cargo("check -p a -p b --features f1,f2,f3")
-        .with_stderr_unordered(
-            "\
-[CHECKING] a [..]
-[CHECKING] b [..]
-[FINISHED] [..]
-[LOCKING] 2 packages to latest compatible versions
-",
+        .with_stderr_data(
+            str![[r#"
+[CHECKING] a v0.1.0 ([ROOT]/foo/a)
+[CHECKING] b v0.1.0 ([ROOT]/foo/b)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]]
+            .unordered(),
         )
         .run();
 }
@@ -293,28 +329,48 @@ fn other_member_from_current() {
 
     // Old behavior.
     p.cargo("run -p bar --features f1")
-        .with_stdout("f3f4")
+        .with_stdout_data(str![[r#"
+f3f4
+
+"#]])
         .run();
 
     p.cargo("run -p bar --features f1,f2")
         .with_status(101)
-        .with_stderr("[ERROR] Package `foo[..]` does not have the feature `f2`")
+        .with_stderr_data(str![[r#"
+[ERROR] Package `foo v0.1.0 ([ROOT]/foo)` does not have the feature `f2`
+
+"#]])
         .run();
 
     p.cargo("run -p bar --features bar/f1")
-        .with_stdout("f1f3")
+        .with_stdout_data(str![[r#"
+f1f3
+
+"#]])
         .run();
 
     // New behavior.
     switch_to_resolver_2(&p);
-    p.cargo("run -p bar --features f1").with_stdout("f1").run();
+    p.cargo("run -p bar --features f1")
+        .with_stdout_data(str![[r#"
+f1
+
+"#]])
+        .run();
 
     p.cargo("run -p bar --features f1,f2")
-        .with_stdout("f1f2")
+        .with_stdout_data(str![[r#"
+f1f2
+
+"#]])
         .run();
 
     p.cargo("run -p bar --features bar/f1")
-        .with_stdout("f1")
+        .with_stdout_data(str![[r#"
+f1
+
+"#]])
         .run();
 }
 
@@ -347,17 +403,26 @@ fn feature_default_resolver() {
 
     p.cargo("check --features testt")
         .with_status(101)
-        .with_stderr("[ERROR] Package `a[..]` does not have the feature `testt`")
+        .with_stderr_data(str![[r#"
+[ERROR] Package `a v0.1.0 ([ROOT]/foo)` does not have the feature `testt`
+
+"#]])
         .run();
 
     p.cargo("run --features test")
         .with_status(0)
-        .with_stdout("feature set")
+        .with_stdout_data(str![[r#"
+feature set
+
+"#]])
         .run();
 
     p.cargo("run --features a/test")
         .with_status(101)
-        .with_stderr("[ERROR] package `a[..]` does not have a dependency named `a`")
+        .with_stderr_data(str![[r#"
+[ERROR] package `a v0.1.0 ([ROOT]/foo)` does not have a dependency named `a`
+
+"#]])
         .run();
 }
 
@@ -425,35 +490,56 @@ fn virtual_member_slash() {
 
     p.cargo("check -p a")
         .with_status(101)
-        .with_stderr_contains("[..]f1 is set[..]")
+        .with_stderr_data(str![[r#"
+...
+[ERROR] f1 is set
+...
+"#]])
         .with_stderr_does_not_contain("[..]f2 is set[..]")
         .with_stderr_does_not_contain("[..]b is set[..]")
         .run();
 
     p.cargo("check -p a --features a/f1")
         .with_status(101)
-        .with_stderr_contains("[..]f1 is set[..]")
+        .with_stderr_data(str![[r#"
+...
+[ERROR] f1 is set
+...
+"#]])
         .with_stderr_does_not_contain("[..]f2 is set[..]")
         .with_stderr_does_not_contain("[..]b is set[..]")
         .run();
 
     p.cargo("check -p a --features a/f2")
         .with_status(101)
-        .with_stderr_contains("[..]f1 is set[..]")
-        .with_stderr_contains("[..]f2 is set[..]")
+        .with_stderr_data(str![[r#"
+...
+[ERROR] f1 is set
+...
+[ERROR] f2 is set
+...
+"#]])
         .with_stderr_does_not_contain("[..]b is set[..]")
         .run();
 
     p.cargo("check -p a --features b/bfeat")
         .with_status(101)
-        .with_stderr_contains("[..]bfeat is set[..]")
+        .with_stderr_data(str![[r#"
+...
+[ERROR] bfeat is set
+...
+"#]])
         .run();
 
     p.cargo("check -p a --no-default-features").run();
 
     p.cargo("check -p a --no-default-features --features b")
         .with_status(101)
-        .with_stderr_contains("[..]b is set[..]")
+        .with_stderr_data(str![[r#"
+...
+[ERROR] b is set
+...
+"#]])
         .run();
 }
 
@@ -483,30 +569,38 @@ fn non_member() {
 
     p.cargo("check -p dep --features f1")
         .with_status(101)
-        .with_stderr("[ERROR] cannot specify features for packages outside of workspace")
+        .with_stderr_data(str![[r#"
+[ERROR] cannot specify features for packages outside of workspace
+
+"#]])
         .run();
 
     p.cargo("check -p dep --all-features")
         .with_status(101)
-        .with_stderr("[ERROR] cannot specify features for packages outside of workspace")
+        .with_stderr_data(str![[r#"
+[ERROR] cannot specify features for packages outside of workspace
+
+"#]])
         .run();
 
     p.cargo("check -p dep --no-default-features")
         .with_status(101)
-        .with_stderr("[ERROR] cannot specify features for packages outside of workspace")
+        .with_stderr_data(str![[r#"
+[ERROR] cannot specify features for packages outside of workspace
+
+"#]])
         .run();
 
     p.cargo("check -p dep")
-        .with_stderr(
-            "\
-[UPDATING] [..]
-[LOCKING] 2 packages to latest compatible versions
-[DOWNLOADING] [..]
-[DOWNLOADED] [..]
-[CHECKING] dep [..]
-[FINISHED] [..]
-",
-        )
+        .with_stderr_data(str![[r#"
+[UPDATING] `dummy-registry` index
+[LOCKING] 1 package to latest compatible version
+[DOWNLOADING] crates ...
+[DOWNLOADED] dep v1.0.0 (registry `dummy-registry`)
+[CHECKING] dep v1.0.0
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 }
 
@@ -549,13 +643,19 @@ fn resolver1_member_features() {
 
     p.cargo("run -p member1 --features member1/m1-feature")
         .cwd("member2")
-        .with_stdout("m1-feature set")
+        .with_stdout_data(str![[r#"
+m1-feature set
+
+"#]])
         .run();
 
     p.cargo("check -p member1 --features member1/m2-feature")
         .cwd("member2")
         .with_status(101)
-        .with_stderr("[ERROR] Package `member1[..]` does not have the feature `m2-feature`")
+        .with_stderr_data(str![[r#"
+[ERROR] Package `member1 v0.1.0 ([ROOT]/foo/member1)` does not have the feature `m2-feature`
+
+"#]])
         .run();
 }
 
@@ -598,35 +698,32 @@ fn non_member_feature() {
     ///////////////////////// V1 non-optional
     eprintln!("V1 non-optional");
     p.cargo("check -p bar")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [CHECKING] bar v1.0.0
-[FINISHED] [..]
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     // TODO: This should not be allowed (future warning?)
     p.cargo("check --features bar/jazz")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [DOWNLOADING] crates ...
-[DOWNLOADED] jazz v1.0.0 [..]
+[DOWNLOADED] jazz v1.0.0 (registry `dummy-registry`)
 [CHECKING] jazz v1.0.0
 [CHECKING] bar v1.0.0
-[CHECKING] foo v0.1.0 [..]
-[FINISHED] [..]
-",
-        )
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     // TODO: This should not be allowed (future warning?)
     p.cargo("check -p bar --features bar/jazz -v")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [FRESH] jazz v1.0.0
 [FRESH] bar v1.0.0
-[FINISHED] [..]
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 
     ///////////////////////// V1 optional
@@ -637,33 +734,30 @@ fn non_member_feature() {
     // practice, so I'm not going to put much effort into improving it.
     p.cargo("check -p bar")
         .with_status(101)
-        .with_stderr(
-            "\
-error: package ID specification `bar` did not match any packages
+        .with_stderr_data(str![[r#"
+[ERROR] package ID specification `bar` did not match any packages
 
-<tab>Did you mean `foo`?
-",
-        )
+	Did you mean `foo`?
+
+"#]])
         .run();
 
     p.cargo("check -p bar --features bar -v")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [FRESH] bar v1.0.0
-[FINISHED] [..]
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 
     // TODO: This should not be allowed (future warning?)
     p.cargo("check -p bar --features bar/jazz -v")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [FRESH] jazz v1.0.0
 [FRESH] bar v1.0.0
-[FINISHED] [..]
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 
     ///////////////////////// V2 non-optional
@@ -671,26 +765,27 @@ error: package ID specification `bar` did not match any packages
     p.change_file("Cargo.toml", &make_toml("2", false));
     // TODO: This should not be allowed (future warning?)
     p.cargo("check --features bar/jazz -v")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [FRESH] jazz v1.0.0
 [FRESH] bar v1.0.0
-[FRESH] foo v0.1.0 [..]
-[FINISHED] [..]
-",
-        )
+[FRESH] foo v0.1.0 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     p.cargo("check -p bar -v")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [FRESH] bar v1.0.0
-[FINISHED] [..]
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     p.cargo("check -p bar --features bar/jazz")
         .with_status(101)
-        .with_stderr("error: cannot specify features for packages outside of workspace")
+        .with_stderr_data(str![[r#"
+[ERROR] cannot specify features for packages outside of workspace
+
+"#]])
         .run();
 
     ///////////////////////// V2 optional
@@ -698,25 +793,33 @@ error: package ID specification `bar` did not match any packages
     p.change_file("Cargo.toml", &make_toml("2", true));
     p.cargo("check -p bar")
         .with_status(101)
-        .with_stderr(
-            "\
-error: package ID specification `bar` did not match any packages
+        .with_stderr_data(str![[r#"
+[ERROR] package ID specification `bar` did not match any packages
 
-<tab>Did you mean `foo`?
-",
-        )
+	Did you mean `foo`?
+
+"#]])
         .run();
     // New --features behavior does not look at cwd.
     p.cargo("check -p bar --features bar")
         .with_status(101)
-        .with_stderr("error: cannot specify features for packages outside of workspace")
+        .with_stderr_data(str![[r#"
+[ERROR] cannot specify features for packages outside of workspace
+
+"#]])
         .run();
     p.cargo("check -p bar --features bar/jazz")
         .with_status(101)
-        .with_stderr("error: cannot specify features for packages outside of workspace")
+        .with_stderr_data(str![[r#"
+[ERROR] cannot specify features for packages outside of workspace
+
+"#]])
         .run();
     p.cargo("check -p bar --features foo/bar")
         .with_status(101)
-        .with_stderr("error: cannot specify features for packages outside of workspace")
+        .with_stderr_data(str![[r#"
+[ERROR] cannot specify features for packages outside of workspace
+
+"#]])
         .run();
 }

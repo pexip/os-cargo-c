@@ -10,9 +10,8 @@ use crate::bindgen::config::{Config, Language, LayoutConfig};
 use crate::bindgen::declarationtyperesolver::DeclarationTypeResolver;
 use crate::bindgen::dependencies::Dependencies;
 use crate::bindgen::ir::{
-    AnnotationSet, Cfg, ConditionWrite, Constant, DeprecatedNoteKind, Documentation, Field,
-    GenericArgument, GenericParams, Item, ItemContainer, Path, Repr, ReprAlign, ReprStyle,
-    ToCondition, Type, Typedef,
+    AnnotationSet, Cfg, Constant, Documentation, Field, GenericArgument, GenericParams, Item,
+    ItemContainer, Path, Repr, ReprAlign, ReprStyle, Type, Typedef,
 };
 use crate::bindgen::library::Library;
 use crate::bindgen::mangle;
@@ -20,7 +19,7 @@ use crate::bindgen::monomorph::Monomorphs;
 use crate::bindgen::rename::{IdentifierType, RenameRule};
 use crate::bindgen::reserved;
 use crate::bindgen::utilities::IterHelpers;
-use crate::bindgen::writer::{ListType, Source, SourceWriter};
+use crate::bindgen::writer::SourceWriter;
 
 #[derive(Debug, Clone)]
 pub struct Struct {
@@ -123,11 +122,27 @@ impl Struct {
         has_tag_field: bool,
         is_enum_variant_body: bool,
         alignment: Option<ReprAlign>,
-        is_transparent: bool,
+        mut is_transparent: bool,
         cfg: Option<Cfg>,
         annotations: AnnotationSet,
         documentation: Documentation,
     ) -> Self {
+        // WARNING: Zero-sized transparent structs are legal rust [1], but zero-sized types of any
+        // repr are "best avoided entirely" [2] because they "will be nonsensical or problematic if
+        // passed through the FFI boundary" [3]. Further, because no well-defined underlying native
+        // type exists for a ZST, we cannot emit a typedef and must define an empty struct instead.
+        //
+        // [1] https://github.com/rust-lang/rust/issues/77841#issuecomment-716575747
+        // [2] https://github.com/rust-lang/rust/issues/77841#issuecomment-716796313
+        // [3] https://doc.rust-lang.org/nomicon/other-reprs.html
+        if fields.is_empty() {
+            warn!(
+                "Passing zero-sized struct {} across the FFI boundary is undefined behavior",
+                &path
+            );
+            is_transparent = false;
+        }
+
         let export_name = path.name().to_owned();
         Self {
             path,
@@ -151,8 +166,12 @@ impl Struct {
         }
     }
 
-    pub fn is_generic(&self) -> bool {
-        self.generic_params.len() > 0
+    /// Attempts to convert this struct to a typedef (only works for transparent structs).
+    pub fn as_typedef(&self) -> Option<Typedef> {
+        match self.fields.first() {
+            Some(field) if self.is_transparent => Some(Typedef::new_from_struct_field(self, field)),
+            _ => None,
+        }
     }
 
     pub fn add_monomorphs(&self, library: &Library, out: &mut Monomorphs) {
@@ -203,7 +222,7 @@ impl Struct {
         )
     }
 
-    fn emit_bitflags_binop<F: Write>(
+    pub(crate) fn emit_bitflags_binop<F: Write>(
         &self,
         constexpr_prefix: &str,
         operator: char,
@@ -267,6 +286,10 @@ impl Item for Struct {
         &mut self.annotations
     }
 
+    fn documentation(&self) -> &Documentation {
+        &self.documentation
+    }
+
     fn container(&self) -> ItemContainer {
         ItemContainer::Struct(self.clone())
     }
@@ -283,6 +306,10 @@ impl Item for Struct {
         for field in &mut self.fields {
             field.ty.resolve_declaration_types(resolver);
         }
+    }
+
+    fn generic_params(&self) -> &GenericParams {
+        &self.generic_params
     }
 
     fn rename_for_config(&mut self, config: &Config) {
@@ -312,10 +339,10 @@ impl Item for Struct {
         {
             let names = self.fields.iter_mut().map(|field| &mut field.name);
 
-            let field_rules = self
-                .annotations
-                .parse_atom::<RenameRule>("rename-all")
-                .unwrap_or(config.structure.rename_fields);
+            let field_rules = self.annotations.parse_atom::<RenameRule>("rename-all");
+            let field_rules = field_rules
+                .as_ref()
+                .unwrap_or(&config.structure.rename_fields);
 
             if let Some(o) = self.annotations.list("field-names") {
                 for (dest, src) in names.zip(o) {
@@ -373,345 +400,5 @@ impl Item for Struct {
         let mappings = self.generic_params.call(self.path.name(), generic_values);
         let monomorph = self.specialize(generic_values, &mappings, library.get_config());
         out.insert_struct(library, self, monomorph, generic_values.to_owned());
-    }
-}
-
-impl Source for Struct {
-    fn write<F: Write>(&self, config: &Config, out: &mut SourceWriter<F>) {
-        if self.is_transparent {
-            let typedef = Typedef {
-                path: self.path.clone(),
-                export_name: self.export_name.to_owned(),
-                generic_params: self.generic_params.clone(),
-                aliased: self.fields[0].ty.clone(),
-                cfg: self.cfg.clone(),
-                annotations: self.annotations.clone(),
-                documentation: self.documentation.clone(),
-            };
-            typedef.write(config, out);
-            for constant in &self.associated_constants {
-                out.new_line();
-                constant.write(config, out, Some(self));
-            }
-            return;
-        }
-
-        let condition = self.cfg.to_condition(config);
-        condition.write_before(config, out);
-
-        self.documentation.write(config, out);
-
-        if !self.is_enum_variant_body {
-            self.generic_params.write(config, out);
-        }
-
-        // The following results in
-        // C++ or C with Tag as style:
-        //   struct Name {
-        // C with Type only style:
-        //   typedef struct {
-        // C with Both as style:
-        //   typedef struct Name {
-        match config.language {
-            Language::C if config.style.generate_typedef() => out.write("typedef "),
-            Language::C | Language::Cxx => {}
-            Language::Cython => out.write(config.style.cython_def()),
-        }
-
-        // Cython extern declarations don't manage layouts, layouts are defined entierly by the
-        // corresponding C code. So this `packed` is only for documentation, and missing
-        // `aligned(n)` is also not a problem.
-        if config.language == Language::Cython {
-            if let Some(align) = self.alignment {
-                match align {
-                    ReprAlign::Packed => out.write("packed "),
-                    ReprAlign::Align(_) => {} // Not supported
-                }
-            }
-        }
-
-        out.write("struct");
-
-        if config.language != Language::Cython {
-            if let Some(align) = self.alignment {
-                match align {
-                    ReprAlign::Packed => {
-                        if let Some(ref anno) = config.layout.packed {
-                            write!(out, " {}", anno);
-                        }
-                    }
-                    ReprAlign::Align(n) => {
-                        if let Some(ref anno) = config.layout.aligned_n {
-                            write!(out, " {}({})", anno, n);
-                        }
-                    }
-                }
-            }
-        }
-
-        if self.annotations.must_use(config) {
-            if let Some(ref anno) = config.structure.must_use {
-                write!(out, " {}", anno);
-            }
-        }
-        if let Some(note) = self
-            .annotations
-            .deprecated_note(config, DeprecatedNoteKind::Struct)
-        {
-            write!(out, " {}", note);
-        }
-
-        if config.language != Language::C || config.style.generate_tag() {
-            write!(out, " {}", self.export_name());
-        }
-
-        out.open_brace();
-
-        // Emit the pre_body section, if relevant
-        if let Some(body) = config.export.pre_body(&self.path) {
-            out.write_raw_block(body);
-            out.new_line();
-        }
-
-        out.write_vertical_source_list(&self.fields, ListType::Cap(";"));
-        if config.language == Language::Cython && self.fields.is_empty() {
-            out.write("pass");
-        }
-
-        if config.language == Language::Cxx {
-            let mut wrote_start_newline = false;
-
-            if config.structure.derive_constructor(&self.annotations) && !self.fields.is_empty() {
-                if !wrote_start_newline {
-                    wrote_start_newline = true;
-                    out.new_line();
-                }
-
-                out.new_line();
-
-                let arg_renamer = |name: &str| {
-                    config
-                        .function
-                        .rename_args
-                        .apply(name, IdentifierType::FunctionArg)
-                        .into_owned()
-                };
-                write!(out, "{}(", self.export_name());
-                let vec: Vec<_> = self
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        Field::from_name_and_type(
-                            // const-ref args to constructor
-                            format!("const& {}", arg_renamer(&field.name)),
-                            field.ty.clone(),
-                        )
-                    })
-                    .collect();
-                out.write_vertical_source_list(&vec[..], ListType::Join(","));
-                write!(out, ")");
-                out.new_line();
-                write!(out, "  : ");
-                let vec: Vec<_> = self
-                    .fields
-                    .iter()
-                    .map(|field| format!("{}({})", field.name, arg_renamer(&field.name)))
-                    .collect();
-                out.write_vertical_source_list(&vec[..], ListType::Join(","));
-                out.new_line();
-                write!(out, "{{}}");
-                out.new_line();
-            }
-
-            let other = config
-                .function
-                .rename_args
-                .apply("other", IdentifierType::FunctionArg);
-
-            if self
-                .annotations
-                .bool("internal-derive-bitflags")
-                .unwrap_or(false)
-            {
-                assert_eq!(self.fields.len(), 1);
-                let bits = &self.fields[0].name;
-                if !wrote_start_newline {
-                    wrote_start_newline = true;
-                    out.new_line();
-                }
-                let constexpr_prefix = if config.constant.allow_constexpr {
-                    "constexpr "
-                } else {
-                    ""
-                };
-
-                out.new_line();
-                write!(out, "{}explicit operator bool() const", constexpr_prefix);
-                out.open_brace();
-                write!(out, "return !!{bits};");
-                out.close_brace(false);
-
-                out.new_line();
-                write!(
-                    out,
-                    "{}{} operator~() const",
-                    constexpr_prefix,
-                    self.export_name()
-                );
-                out.open_brace();
-                write!(
-                    out,
-                    "return {} {{ static_cast<decltype({bits})>(~{bits}) }};",
-                    self.export_name()
-                );
-                out.close_brace(false);
-                self.emit_bitflags_binop(constexpr_prefix, '|', &other, out);
-                self.emit_bitflags_binop(constexpr_prefix, '&', &other, out);
-                self.emit_bitflags_binop(constexpr_prefix, '^', &other, out);
-            }
-
-            // Generate a serializer function that allows dumping this struct
-            // to an std::ostream. It's defined as a friend function inside the
-            // struct definition, and doesn't need the `inline` keyword even
-            // though it's implemented right in the generated header file.
-            if config.structure.derive_ostream(&self.annotations) {
-                if !wrote_start_newline {
-                    wrote_start_newline = true;
-                    out.new_line();
-                }
-
-                out.new_line();
-                let stream = config
-                    .function
-                    .rename_args
-                    .apply("stream", IdentifierType::FunctionArg);
-                let instance = config
-                    .function
-                    .rename_args
-                    .apply("instance", IdentifierType::FunctionArg);
-                write!(
-                    out,
-                    "friend std::ostream& operator<<(std::ostream& {}, const {}& {})",
-                    stream,
-                    self.export_name(),
-                    instance,
-                );
-                out.open_brace();
-                write!(out, "return {} << \"{{ \"", stream);
-                let vec: Vec<_> = self
-                    .fields
-                    .iter()
-                    .map(|x| format!(" << \"{}=\" << {}.{}", x.name, instance, x.name))
-                    .collect();
-                out.write_vertical_source_list(&vec[..], ListType::Join(" << \", \""));
-                out.write(" << \" }\";");
-                out.close_brace(false);
-            }
-
-            let skip_fields = self.has_tag_field as usize;
-
-            macro_rules! emit_op {
-                ($op_name:expr, $op:expr, $conjuc:expr) => {{
-                    if !wrote_start_newline {
-                        #[allow(unused_assignments)]
-                        {
-                            wrote_start_newline = true;
-                        }
-                        out.new_line();
-                    }
-
-                    out.new_line();
-
-                    if let Some(Some(attrs)) =
-                        self.annotations.atom(concat!($op_name, "-attributes"))
-                    {
-                        write!(out, "{} ", attrs);
-                    }
-
-                    write!(
-                        out,
-                        "bool operator{}(const {}& {}) const",
-                        $op,
-                        self.export_name(),
-                        other
-                    );
-                    out.open_brace();
-                    out.write("return ");
-                    let vec: Vec<_> = self
-                        .fields
-                        .iter()
-                        .skip(skip_fields)
-                        .map(|field| format!("{} {} {}.{}", field.name, $op, other, field.name))
-                        .collect();
-                    out.write_vertical_source_list(
-                        &vec[..],
-                        ListType::Join(&format!(" {}", $conjuc)),
-                    );
-                    out.write(";");
-                    out.close_brace(false);
-                }};
-            }
-
-            if config.structure.derive_eq(&self.annotations) && self.can_derive_eq() {
-                emit_op!("eq", "==", "&&");
-            }
-            if config.structure.derive_neq(&self.annotations) && self.can_derive_eq() {
-                emit_op!("neq", "!=", "||");
-            }
-            if config.structure.derive_lt(&self.annotations)
-                && self.fields.len() == 1
-                && self.fields[0].ty.can_cmp_order()
-            {
-                emit_op!("lt", "<", "&&");
-            }
-            if config.structure.derive_lte(&self.annotations)
-                && self.fields.len() == 1
-                && self.fields[0].ty.can_cmp_order()
-            {
-                emit_op!("lte", "<=", "&&");
-            }
-            if config.structure.derive_gt(&self.annotations)
-                && self.fields.len() == 1
-                && self.fields[0].ty.can_cmp_order()
-            {
-                emit_op!("gt", ">", "&&");
-            }
-            if config.structure.derive_gte(&self.annotations)
-                && self.fields.len() == 1
-                && self.fields[0].ty.can_cmp_order()
-            {
-                emit_op!("gte", ">=", "&&");
-            }
-        }
-
-        // Emit the post_body section, if relevant
-        if let Some(body) = config.export.post_body(&self.path) {
-            out.new_line();
-            out.write_raw_block(body);
-        }
-
-        if config.language == Language::Cxx
-            && config.structure.associated_constants_in_body
-            && config.constant.allow_static_const
-        {
-            for constant in &self.associated_constants {
-                out.new_line();
-                constant.write_declaration(config, out, self);
-            }
-        }
-
-        if config.language == Language::C && config.style.generate_typedef() {
-            out.close_brace(false);
-            write!(out, " {};", self.export_name());
-        } else {
-            out.close_brace(true);
-        }
-
-        for constant in &self.associated_constants {
-            out.new_line();
-            constant.write(config, out, Some(self));
-        }
-
-        condition.write_after(config, out);
     }
 }

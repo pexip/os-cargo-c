@@ -183,16 +183,18 @@
 //! ```
 
 #![no_std]
-#![doc(html_root_url = "https://docs.rs/serde-untagged/0.1.6")]
+#![doc(html_root_url = "https://docs.rs/serde-untagged/0.1.7")]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(
     clippy::doc_markdown,
+    clippy::elidable_lifetime_names,
     clippy::enum_glob_use,
     clippy::manual_assert,
     clippy::manual_map,
     clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     clippy::must_use_candidate,
+    clippy::needless_lifetimes,
     clippy::needless_pass_by_value,
     clippy::new_without_default,
     clippy::type_complexity

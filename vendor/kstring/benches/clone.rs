@@ -1,7 +1,7 @@
 #![allow(
     clippy::clone_on_copy,
     clippy::useless_conversion,
-    clippy::clone_double_ref
+    suspicious_double_ref_op
 )]
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -57,7 +57,7 @@ fn bench_clone(c: &mut Criterion) {
             BenchmarkId::new("KString::from_static", len),
             &len,
             |b, _| {
-                let uut = kstring::KString::from_static(*fixture);
+                let uut = kstring::KString::from_static(fixture);
                 let uut = criterion::black_box(uut);
                 b.iter(|| uut.clone())
             },
@@ -83,7 +83,7 @@ fn bench_clone(c: &mut Criterion) {
             BenchmarkId::new("KStringCow::from_static", len),
             &len,
             |b, _| {
-                let uut = kstring::KStringCow::from_static(*fixture);
+                let uut = kstring::KStringCow::from_static(fixture);
                 let uut = criterion::black_box(uut);
                 b.iter(|| uut.clone())
             },
@@ -115,7 +115,7 @@ fn bench_clone(c: &mut Criterion) {
             BenchmarkId::new("KStringRef::from_static", len),
             &len,
             |b, _| {
-                let uut = kstring::KStringRef::from_static(*fixture);
+                let uut = kstring::KStringRef::from_static(fixture);
                 let uut = criterion::black_box(uut);
                 b.iter(|| uut.clone())
             },

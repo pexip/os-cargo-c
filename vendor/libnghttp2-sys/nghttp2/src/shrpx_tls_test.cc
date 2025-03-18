@@ -30,6 +30,7 @@
 #include "shrpx_log.h"
 #include "util.h"
 #include "template.h"
+#include "ssl_compat.h"
 
 using namespace nghttp2;
 
@@ -37,33 +38,33 @@ namespace shrpx {
 
 namespace {
 const MunitTest tests[]{
-    munit_void_test(test_shrpx_tls_create_lookup_tree),
-    munit_void_test(test_shrpx_tls_cert_lookup_tree_add_ssl_ctx),
-    munit_void_test(test_shrpx_tls_tls_hostname_match),
-    munit_void_test(test_shrpx_tls_verify_numeric_hostname),
-    munit_void_test(test_shrpx_tls_verify_dns_hostname),
-    munit_test_end(),
+  munit_void_test(test_shrpx_tls_create_lookup_tree),
+  munit_void_test(test_shrpx_tls_cert_lookup_tree_add_ssl_ctx),
+  munit_void_test(test_shrpx_tls_tls_hostname_match),
+  munit_void_test(test_shrpx_tls_verify_numeric_hostname),
+  munit_void_test(test_shrpx_tls_verify_dns_hostname),
+  munit_test_end(),
 };
 } // namespace
 
 const MunitSuite tls_suite{
-    "/tls", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE,
+  "/tls", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE,
 };
 
 void test_shrpx_tls_create_lookup_tree(void) {
   auto tree = std::make_unique<tls::CertLookupTree>();
 
   constexpr StringRef hostnames[] = {
-      StringRef::from_lit("example.com"),             // 0
-      StringRef::from_lit("www.example.org"),         // 1
-      StringRef::from_lit("*www.example.org"),        // 2
-      StringRef::from_lit("xy*.host.domain"),         // 3
-      StringRef::from_lit("*yy.host.domain"),         // 4
-      StringRef::from_lit("nghttp2.sourceforge.net"), // 5
-      StringRef::from_lit("sourceforge.net"),         // 6
-      StringRef::from_lit("sourceforge.net"),         // 7, duplicate
-      StringRef::from_lit("*.foo.bar"), // 8, oo.bar is suffix of *.foo.bar
-      StringRef::from_lit("oo.bar")     // 9
+    "example.com"_sr,             // 0
+    "www.example.org"_sr,         // 1
+    "*www.example.org"_sr,        // 2
+    "xy*.host.domain"_sr,         // 3
+    "*yy.host.domain"_sr,         // 4
+    "nghttp2.sourceforge.net"_sr, // 5
+    "sourceforge.net"_sr,         // 6
+    "sourceforge.net"_sr,         // 7, duplicate
+    "*.foo.bar"_sr,               // 8, oo.bar is suffix of *.foo.bar
+    "oo.bar"_sr                   // 9
   };
   auto num = array_size(hostnames);
 
@@ -75,13 +76,13 @@ void test_shrpx_tls_create_lookup_tree(void) {
 
   assert_ssize(0, ==, tree->lookup(hostnames[0]));
   assert_ssize(1, ==, tree->lookup(hostnames[1]));
-  assert_ssize(2, ==, tree->lookup(StringRef::from_lit("2www.example.org")));
-  assert_ssize(-1, ==, tree->lookup(StringRef::from_lit("www2.example.org")));
-  assert_ssize(3, ==, tree->lookup(StringRef::from_lit("xy1.host.domain")));
+  assert_ssize(2, ==, tree->lookup("2www.example.org"_sr));
+  assert_ssize(-1, ==, tree->lookup("www2.example.org"_sr));
+  assert_ssize(3, ==, tree->lookup("xy1.host.domain"_sr));
   // Does not match *yy.host.domain, because * must match at least 1
   // character.
-  assert_ssize(-1, ==, tree->lookup(StringRef::from_lit("yy.host.domain")));
-  assert_ssize(4, ==, tree->lookup(StringRef::from_lit("xyy.host.domain")));
+  assert_ssize(-1, ==, tree->lookup("yy.host.domain"_sr));
+  assert_ssize(4, ==, tree->lookup("xyy.host.domain"_sr));
   assert_ssize(-1, ==, tree->lookup(StringRef{}));
   assert_ssize(5, ==, tree->lookup(hostnames[5]));
   assert_ssize(6, ==, tree->lookup(hostnames[6]));
@@ -89,14 +90,14 @@ void test_shrpx_tls_create_lookup_tree(void) {
   for (int i = 0; i < 7; ++i) {
     assert_ssize(-1, ==, tree->lookup(StringRef{h6 + i, str_size(h6) - i}));
   }
-  assert_ssize(8, ==, tree->lookup(StringRef::from_lit("x.foo.bar")));
+  assert_ssize(8, ==, tree->lookup("x.foo.bar"_sr));
   assert_ssize(9, ==, tree->lookup(hostnames[9]));
 
   constexpr StringRef names[] = {
-      StringRef::from_lit("rab"),  // 1
-      StringRef::from_lit("zab"),  // 2
-      StringRef::from_lit("zzub"), // 3
-      StringRef::from_lit("ab")    // 4
+    "rab"_sr,  // 1
+    "zab"_sr,  // 2
+    "zzub"_sr, // 3
+    "ab"_sr    // 4
   };
   num = array_size(names);
 
@@ -135,7 +136,7 @@ void test_shrpx_tls_cert_lookup_tree_add_ssl_ctx(void) {
   int rv;
 
   static constexpr char nghttp2_certfile[] =
-      NGHTTP2_SRC_DIR "/test.nghttp2.org.pem";
+    NGHTTP2_SRC_DIR "/test.nghttp2.org.pem";
   auto nghttp2_ssl_ctx = SSL_CTX_new(TLS_server_method());
   auto nghttp2_ssl_ctx_del = defer(SSL_CTX_free, nghttp2_ssl_ctx);
   auto nghttp2_tls_ctx_data = std::make_unique<tls::TLSContextData>();
@@ -146,7 +147,7 @@ void test_shrpx_tls_cert_lookup_tree_add_ssl_ctx(void) {
   assert_int(1, ==, rv);
 
   static constexpr char examples_certfile[] =
-      NGHTTP2_SRC_DIR "/test.example.com.pem";
+    NGHTTP2_SRC_DIR "/test.example.com.pem";
   auto examples_ssl_ctx = SSL_CTX_new(TLS_server_method());
   auto examples_ssl_ctx_del = defer(SSL_CTX_free, examples_ssl_ctx);
   auto examples_tls_ctx_data = std::make_unique<tls::TLSContextData>();
@@ -159,22 +160,27 @@ void test_shrpx_tls_cert_lookup_tree_add_ssl_ctx(void) {
   tls::CertLookupTree tree;
   std::vector<std::vector<SSL_CTX *>> indexed_ssl_ctx;
 
-  rv = tls::cert_lookup_tree_add_ssl_ctx(&tree, indexed_ssl_ctx,
-                                         nghttp2_ssl_ctx);
+  rv =
+    tls::cert_lookup_tree_add_ssl_ctx(&tree, indexed_ssl_ctx, nghttp2_ssl_ctx);
 
   assert_int(0, ==, rv);
 
-  rv = tls::cert_lookup_tree_add_ssl_ctx(&tree, indexed_ssl_ctx,
-                                         examples_ssl_ctx);
+  rv =
+    tls::cert_lookup_tree_add_ssl_ctx(&tree, indexed_ssl_ctx, examples_ssl_ctx);
 
   assert_int(0, ==, rv);
 
-  assert_ssize(-1, ==,
-               tree.lookup(StringRef::from_lit("not-used.nghttp2.org")));
-  assert_ssize(0, ==, tree.lookup(StringRef::from_lit("test.nghttp2.org")));
-  assert_ssize(1, ==, tree.lookup(StringRef::from_lit("w.test.nghttp2.org")));
-  assert_ssize(2, ==, tree.lookup(StringRef::from_lit("www.test.nghttp2.org")));
-  assert_ssize(3, ==, tree.lookup(StringRef::from_lit("test.example.com")));
+  assert_ssize(-1, ==, tree.lookup("not-used.nghttp2.org"_sr));
+#ifdef NGHTTP2_OPENSSL_IS_WOLFSSL
+  assert_ssize(0, ==, tree.lookup("www.test.nghttp2.org"_sr));
+  assert_ssize(1, ==, tree.lookup("w.test.nghttp2.org"_sr));
+  assert_ssize(2, ==, tree.lookup("test.nghttp2.org"_sr));
+#else  // !NGHTTP2_OPENSSL_IS_WOLFSSL
+  assert_ssize(0, ==, tree.lookup("test.nghttp2.org"_sr));
+  assert_ssize(1, ==, tree.lookup("w.test.nghttp2.org"_sr));
+  assert_ssize(2, ==, tree.lookup("www.test.nghttp2.org"_sr));
+#endif // !NGHTTP2_OPENSSL_IS_WOLFSSL
+  assert_ssize(3, ==, tree.lookup("test.example.com"_sr));
 }
 
 template <size_t N, size_t M>
@@ -191,21 +197,21 @@ void test_shrpx_tls_tls_hostname_match(void) {
   assert_true(tls_hostname_match_wrapper("*.example.com", "www.example.com"));
   assert_true(tls_hostname_match_wrapper("*w.example.com", "www.example.com"));
   assert_true(
-      tls_hostname_match_wrapper("www*.example.com", "www1.example.com"));
+    tls_hostname_match_wrapper("www*.example.com", "www1.example.com"));
   assert_true(
-      tls_hostname_match_wrapper("www*.example.com", "WWW12.EXAMPLE.com"));
+    tls_hostname_match_wrapper("www*.example.com", "WWW12.EXAMPLE.com"));
   // at least 2 dots are required after '*'
   assert_false(tls_hostname_match_wrapper("*.com", "example.com"));
   assert_false(tls_hostname_match_wrapper("*", "example.com"));
   // '*' must be in left most label
   assert_false(
-      tls_hostname_match_wrapper("blog.*.example.com", "blog.my.example.com"));
+    tls_hostname_match_wrapper("blog.*.example.com", "blog.my.example.com"));
   // prefix is wrong
   assert_false(
-      tls_hostname_match_wrapper("client*.example.com", "server.example.com"));
+    tls_hostname_match_wrapper("client*.example.com", "server.example.com"));
   // '*' must match at least one character
   assert_false(
-      tls_hostname_match_wrapper("www*.example.com", "www.example.com"));
+    tls_hostname_match_wrapper("www*.example.com", "www.example.com"));
 
   assert_false(tls_hostname_match_wrapper("example.com", "nghttp2.org"));
   assert_false(tls_hostname_match_wrapper("www.example.com", "example.com"));
@@ -249,11 +255,10 @@ static Address parse_addr(const char *ipaddr) {
 void test_shrpx_tls_verify_numeric_hostname(void) {
   {
     // Successful IPv4 address match in SAN
-    static constexpr char ipaddr[] = "127.0.0.1";
+    static constexpr auto ipaddr = "127.0.0.1"_sr;
     auto cert = load_cert(NGHTTP2_SRC_DIR "/testdata/verify_hostname.crt");
-    auto addr = parse_addr(ipaddr);
-    auto rv =
-        tls::verify_numeric_hostname(cert, StringRef::from_lit(ipaddr), &addr);
+    auto addr = parse_addr(ipaddr.data());
+    auto rv = tls::verify_numeric_hostname(cert, ipaddr, &addr);
 
     assert_int(0, ==, rv);
 
@@ -262,11 +267,10 @@ void test_shrpx_tls_verify_numeric_hostname(void) {
 
   {
     // Successful IPv6 address match in SAN
-    static constexpr char ipaddr[] = "::1";
+    static constexpr auto ipaddr = "::1"_sr;
     auto cert = load_cert(NGHTTP2_SRC_DIR "/testdata/verify_hostname.crt");
-    auto addr = parse_addr(ipaddr);
-    auto rv =
-        tls::verify_numeric_hostname(cert, StringRef::from_lit(ipaddr), &addr);
+    auto addr = parse_addr(ipaddr.data());
+    auto rv = tls::verify_numeric_hostname(cert, ipaddr, &addr);
 
     assert_int(0, ==, rv);
 
@@ -275,11 +279,10 @@ void test_shrpx_tls_verify_numeric_hostname(void) {
 
   {
     // Unsuccessful IPv4 address match in SAN
-    static constexpr char ipaddr[] = "192.168.0.127";
+    static constexpr auto ipaddr = "192.168.0.127"_sr;
     auto cert = load_cert(NGHTTP2_SRC_DIR "/testdata/verify_hostname.crt");
-    auto addr = parse_addr(ipaddr);
-    auto rv =
-        tls::verify_numeric_hostname(cert, StringRef::from_lit(ipaddr), &addr);
+    auto addr = parse_addr(ipaddr.data());
+    auto rv = tls::verify_numeric_hostname(cert, ipaddr, &addr);
 
     assert_int(-1, ==, rv);
 
@@ -288,11 +291,10 @@ void test_shrpx_tls_verify_numeric_hostname(void) {
 
   {
     // CommonName is not used if SAN is available
-    static constexpr char ipaddr[] = "192.168.0.1";
+    static constexpr auto ipaddr = "192.168.0.1"_sr;
     auto cert = load_cert(NGHTTP2_SRC_DIR "/testdata/ipaddr.crt");
-    auto addr = parse_addr(ipaddr);
-    auto rv =
-        tls::verify_numeric_hostname(cert, StringRef::from_lit(ipaddr), &addr);
+    auto addr = parse_addr(ipaddr.data());
+    auto rv = tls::verify_numeric_hostname(cert, ipaddr, &addr);
 
     assert_int(-1, ==, rv);
 
@@ -301,11 +303,10 @@ void test_shrpx_tls_verify_numeric_hostname(void) {
 
   {
     // Successful IPv4 address match in CommonName
-    static constexpr char ipaddr[] = "127.0.0.1";
+    static constexpr auto ipaddr = "127.0.0.1"_sr;
     auto cert = load_cert(NGHTTP2_SRC_DIR "/testdata/nosan_ip.crt");
-    auto addr = parse_addr(ipaddr);
-    auto rv =
-        tls::verify_numeric_hostname(cert, StringRef::from_lit(ipaddr), &addr);
+    auto addr = parse_addr(ipaddr.data());
+    auto rv = tls::verify_numeric_hostname(cert, ipaddr, &addr);
 
     assert_int(0, ==, rv);
 
@@ -317,8 +318,7 @@ void test_shrpx_tls_verify_dns_hostname(void) {
   {
     // Successful exact DNS name match in SAN
     auto cert = load_cert(NGHTTP2_SRC_DIR "/testdata/verify_hostname.crt");
-    auto rv = tls::verify_dns_hostname(
-        cert, StringRef::from_lit("nghttp2.example.com"));
+    auto rv = tls::verify_dns_hostname(cert, "nghttp2.example.com"_sr);
 
     assert_int(0, ==, rv);
 
@@ -328,8 +328,7 @@ void test_shrpx_tls_verify_dns_hostname(void) {
   {
     // Successful wildcard DNS name match in SAN
     auto cert = load_cert(NGHTTP2_SRC_DIR "/testdata/verify_hostname.crt");
-    auto rv = tls::verify_dns_hostname(
-        cert, StringRef::from_lit("www.nghttp2.example.com"));
+    auto rv = tls::verify_dns_hostname(cert, "www.nghttp2.example.com"_sr);
 
     assert_int(0, ==, rv);
 
@@ -339,7 +338,7 @@ void test_shrpx_tls_verify_dns_hostname(void) {
   {
     // CommonName is not used if SAN is available.
     auto cert = load_cert(NGHTTP2_SRC_DIR "/testdata/verify_hostname.crt");
-    auto rv = tls::verify_dns_hostname(cert, StringRef::from_lit("localhost"));
+    auto rv = tls::verify_dns_hostname(cert, "localhost"_sr);
 
     assert_int(-1, ==, rv);
 
@@ -349,7 +348,7 @@ void test_shrpx_tls_verify_dns_hostname(void) {
   {
     // Successful DNS name match in CommonName
     auto cert = load_cert(NGHTTP2_SRC_DIR "/testdata/nosan.crt");
-    auto rv = tls::verify_dns_hostname(cert, StringRef::from_lit("localhost"));
+    auto rv = tls::verify_dns_hostname(cert, "localhost"_sr);
 
     assert_int(0, ==, rv);
 

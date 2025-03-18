@@ -110,7 +110,7 @@ impl<'repo> Delegate<'repo> {
     }
 }
 
-impl<'repo> parse::Delegate for Delegate<'repo> {
+impl parse::Delegate for Delegate<'_> {
     fn done(&mut self) {
         self.follow_refs_to_objects_if_needed();
         self.disambiguate_objects_by_fallback_hint(
@@ -121,7 +121,7 @@ impl<'repo> parse::Delegate for Delegate<'repo> {
     }
 }
 
-impl<'repo> delegate::Kind for Delegate<'repo> {
+impl delegate::Kind for Delegate<'_> {
     fn kind(&mut self, kind: gix_revision::spec::Kind) -> Option<()> {
         use gix_revision::spec::Kind::*;
         self.kind = Some(kind);
@@ -137,7 +137,7 @@ impl<'repo> delegate::Kind for Delegate<'repo> {
     }
 }
 
-impl<'repo> Delegate<'repo> {
+impl Delegate<'_> {
     fn kind_implies_committish(&self) -> bool {
         self.kind.unwrap_or(gix_revision::spec::Kind::IncludeReachable) != gix_revision::spec::Kind::IncludeReachable
     }
@@ -203,11 +203,16 @@ impl<'repo> Delegate<'repo> {
         for (r, obj) in self.refs.iter().zip(self.objs.iter_mut()) {
             if let (Some(ref_), obj_opt @ None) = (r, obj) {
                 if let Some(id) = ref_.target.try_id().map(ToOwned::to_owned).or_else(|| {
-                    ref_.clone()
-                        .attach(repo)
-                        .peel_to_id_in_place()
-                        .ok()
-                        .map(crate::Id::detach)
+                    match ref_.clone().attach(repo).peel_to_id_in_place() {
+                        Err(err) => {
+                            self.err.push(Error::PeelToId {
+                                name: ref_.name.clone(),
+                                source: err,
+                            });
+                            None
+                        }
+                        Ok(id) => Some(id.detach()),
+                    }
                 }) {
                     obj_opt.get_or_insert_with(HashSet::default).insert(id);
                 };

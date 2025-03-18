@@ -2,6 +2,7 @@ use std::fmt;
 use std::io::prelude::*;
 use std::io::IsTerminal;
 
+use annotate_snippets::{Message, Renderer};
 use anstream::AutoStream;
 use anstyle::Style;
 
@@ -391,6 +392,19 @@ impl Shell {
         drop(writeln!(self.out(), "{}", encoded));
         Ok(())
     }
+
+    /// Prints the passed in [Message] to stderr
+    pub fn print_message(&mut self, message: Message<'_>) -> std::io::Result<()> {
+        let term_width = self
+            .err_width()
+            .diagnostic_terminal_width()
+            .unwrap_or(annotate_snippets::renderer::DEFAULT_TERM_WIDTH);
+        writeln!(
+            self.err(),
+            "{}",
+            Renderer::styled().term_width(term_width).render(message)
+        )
+    }
 }
 
 impl Default for Shell {
@@ -648,7 +662,7 @@ mod imp {
                 ptr::null_mut(),
                 OPEN_EXISTING,
                 0,
-                0,
+                std::ptr::null_mut(),
             );
             if h == INVALID_HANDLE_VALUE {
                 return TtyWidth::NoTty;

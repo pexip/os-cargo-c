@@ -356,7 +356,13 @@ For more information, see issue #12207 <https://github.com/rust-lang/cargo/issue
                 let global_args = GlobalArgs::new(sub_args);
                 let new_args = cli(gctx).no_binary_name(true).try_get_matches_from(alias)?;
 
-                let new_cmd = new_args.subcommand_name().expect("subcommand is required");
+                let Some(new_cmd) = new_args.subcommand_name() else {
+                    return Err(anyhow!(
+                        "subcommand is required, add a subcommand to the command alias `alias.{cmd}`"
+                    )
+                        .into());
+                };
+
                 already_expanded.push(cmd.to_string());
                 if already_expanded.contains(&new_cmd.to_string()) {
                     // Crash if the aliases are corecursive / unresolvable
@@ -662,7 +668,7 @@ See '<cyan,bold>cargo help</> <cyan><<command>></>' for more information on a sp
             .action(ArgAction::SetTrue)
             .global(true)
             .hide(true))
-        .arg(multi_opt("config", "KEY=VALUE", "Override a configuration value").global(true))
+        .arg(multi_opt("config", "KEY=VALUE|PATH", "Override a configuration value").global(true))
         // Better suggestion for the unsupported lowercase unstable feature flag.
         .arg( Arg::new("unsupported-lowercase-unstable-feature-flag")
             .help("")
@@ -676,7 +682,15 @@ See '<cyan,bold>cargo help</> <cyan><<command>></>' for more information on a sp
             .short('Z')
             .value_name("FLAG")
             .action(ArgAction::Append)
-            .global(true))
+            .global(true)
+        .add(clap_complete::ArgValueCandidates::new(|| {
+            let flags = CliUnstable::help();
+            flags.into_iter().map(|flag| {
+                clap_complete::CompletionCandidate::new(flag.0.replace("_", "-")).help(flag.1.map(|help| {
+                    help.into()
+                }))
+            }).collect()
+        })))
         .subcommands(commands::builtin())
 }
 

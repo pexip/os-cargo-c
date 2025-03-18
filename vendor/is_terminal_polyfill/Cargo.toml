@@ -13,7 +13,8 @@
 edition = "2021"
 rust-version = "1.70.0"
 name = "is_terminal_polyfill"
-version = "1.70.0"
+version = "1.70.1"
+build = false
 include = [
     "build.rs",
     "src/**/*",
@@ -24,6 +25,10 @@ include = [
     "benches/**/*",
     "examples/**/*",
 ]
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Polyfill for `is_terminal` stdlib feature for use with older MSRVs"
 readme = "README.md"
 keywords = []
@@ -72,6 +77,10 @@ replace = """
 <!-- next-url -->
 [Unreleased]: https://github.com/polyfill-rs/is_terminal_polyfill/compare/{{tag_name}}...HEAD"""
 search = "<!-- next-url -->"
+
+[lib]
+name = "is_terminal_polyfill"
+path = "src/lib.rs"
 
 [dependencies]
 

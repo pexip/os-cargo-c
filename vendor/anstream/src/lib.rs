@@ -12,7 +12,6 @@
 //!
 //! Available styling crates:
 //! - [anstyle](https://docs.rs/anstyle) for minimal runtime styling, designed to go in public APIs
-//!   (once it hits 1.0)
 //! - [owo-colors](https://docs.rs/owo-colors) for feature-rich runtime styling
 //! - [color-print](https://docs.rs/color-print) for feature-rich compile-time styling
 //!
@@ -39,11 +38,12 @@
 
 pub mod adapter;
 pub mod stream;
-
-mod buffer;
+#[doc(hidden)]
 #[macro_use]
-mod macros;
+pub mod _macros;
+
 mod auto;
+mod buffer;
 mod fmt;
 mod strip;
 #[cfg(all(windows, feature = "wincon"))]

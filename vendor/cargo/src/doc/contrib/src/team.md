@@ -48,7 +48,7 @@ Members are required to always:
 
 Members are given privileges, such as:
 
-- Merge permissions (bors rights)
+- Merge permissions (GitHub permissions)
 - Issue and project management (GitHub permissions)
 - Voting and decision making (RFCs, major changes)
 - Access to private communications related to team management and security discussions
@@ -135,6 +135,7 @@ The degree of process is correlated with the degree of change being proposed:
     These decisions are usually processed via private channels by the entirety of the team.
   - A change that is a "one-way door".
     That is, something that is difficult to reverse without breaking backwards compatibility.
+  - New or transferred "Intentional Artifact" crates to the team, see also [Rust crate ownership policy](https://forge.rust-lang.org/policies/crate-ownership.html)
 
 - Larger features should usually go through the [RFC process].
   This usually involves first soliciting feedback from the Cargo team and the rest of the community, often via the [Rust Internals] discussion board, [Cargo's issue tracker], and the [Zulip] channel.
@@ -164,6 +165,16 @@ The degree of process is correlated with the degree of change being proposed:
 [Backwards compatibility]: design.md#backwards-compatibility
 [Stable backports]: process/release.md#stable-backports
 [SemVer chapter]: https://doc.rust-lang.org/cargo/reference/semver.html
+
+## Intentional Artifacts
+
+Per the [Rust crate ownership policy](https://forge.rust-lang.org/policies/crate-ownership.html), the Cargo team's "Intentional Artifacts" include:
+
+- [build-rs](https://crates.io/crates/build-rs)
+- [cargo-credential](https://crates.io/crates/cargo-credential)
+- [cargo-platform](https://crates.io/crates/cargo-platform)
+- [cargo-util-schemas](https://crates.io/crates/cargo-util-schemas)
+- [crates-io](https://crates.io/crates/crates-io)
 
 ## Contacting the team
 

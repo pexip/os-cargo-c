@@ -115,7 +115,7 @@ unsafe impl<'vtab> VTab<'vtab> for CsvTab {
                     if !Path::new(value).exists() {
                         return Err(Error::ModuleError(format!("file '{value}' does not exist")));
                     }
-                    vtab.filename = value.to_owned();
+                    value.clone_into(&mut vtab.filename);
                 }
                 "schema" => {
                     schema = Some(value.to_owned());
@@ -350,7 +350,9 @@ mod test {
     fn test_csv_module() -> Result<()> {
         let db = Connection::open_in_memory()?;
         csvtab::load_module(&db)?;
-        db.execute_batch("CREATE VIRTUAL TABLE vtab USING csv(filename='test.csv', header=yes)")?;
+        db.execute_batch(
+            "CREATE VIRTUAL TABLE vtab USING csv(filename = 'test.csv', header = yes)",
+        )?;
 
         {
             let mut s = db.prepare("SELECT rowid, * FROM vtab")?;

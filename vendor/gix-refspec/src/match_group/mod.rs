@@ -6,7 +6,6 @@ pub(crate) mod types;
 pub use types::{Item, Mapping, Outcome, Source, SourceRef};
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod validate;
 
 /// Initialization
@@ -76,7 +75,7 @@ impl<'a> MatchGroup<'a> {
                             lhs: SourceRef::FullName(item.full_ref_name),
                             rhs,
                             spec_index,
-                        })
+                        });
                     }
                 }
             }

@@ -27,6 +27,8 @@ enum Separator {
     BeginFn,
     BetweenFnArg,
     EndFn,
+    BeginArray,
+    BetweenArray,
 }
 
 struct Mangler<'a> {
@@ -128,19 +130,18 @@ impl<'a> Mangler<'a> {
                     self.push(Separator::EndFn);
                 }
             }
-            Type::Array(..) => {
-                unimplemented!(
-                    "Unable to mangle generic parameter {:?} for '{}'",
-                    ty,
-                    self.input
-                );
+            Type::Array(ref ty, ref len) => {
+                self.push(Separator::BeginArray);
+                self.append_mangled_type(ty, false);
+                self.push(Separator::BetweenArray);
+                self.append_mangled_argument(&GenericArgument::Const(len.clone()), last);
             }
         }
     }
 
     fn mangle_internal(&mut self) {
         debug_assert!(self.output.is_empty());
-        self.output = self.input.to_owned();
+        self.input.clone_into(&mut self.output);
         if self.generic_values.is_empty() {
             return;
         }

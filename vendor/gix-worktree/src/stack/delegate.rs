@@ -1,4 +1,3 @@
-use crate::stack::mode_is_dir;
 use crate::{stack::State, PathIdMapping};
 
 /// Various aggregate numbers related to the stack delegate itself.
@@ -28,7 +27,7 @@ pub(crate) struct StackDelegate<'a, 'find> {
     pub statistics: &'a mut super::Statistics,
 }
 
-impl<'a, 'find> gix_fs::stack::Delegate for StackDelegate<'a, 'find> {
+impl gix_fs::stack::Delegate for StackDelegate<'_, '_> {
     fn push_directory(&mut self, stack: &gix_fs::Stack) -> std::io::Result<()> {
         self.statistics.delegate.push_directory += 1;
         let rela_dir_bstr = gix_path::into_bstr(stack.current_relative());
@@ -66,7 +65,7 @@ impl<'a, 'find> gix_fs::stack::Delegate for StackDelegate<'a, 'find> {
                     self.objects,
                     self.case,
                     &mut self.statistics.ignore,
-                )?
+                )?;
             }
             State::IgnoreStack(ignore) => ignore.push_directory(
                 stack.root(),
@@ -99,7 +98,7 @@ impl<'a, 'find> gix_fs::stack::Delegate for StackDelegate<'a, 'find> {
                     self.mode,
                     &mut self.statistics.delegate.num_mkdir_calls,
                     *unlink_on_collision,
-                )?
+                )?;
             }
             #[cfg(feature = "attributes")]
             State::AttributesAndIgnoreStack { .. } | State::AttributesStack(_) => {}
@@ -167,7 +166,7 @@ fn create_leading_directory(
     mkdir_calls: &mut usize,
     unlink_on_collision: bool,
 ) -> std::io::Result<()> {
-    if is_last_component && !mode_is_dir(mode).unwrap_or(false) {
+    if is_last_component && !crate::stack::mode_is_dir(mode).unwrap_or(false) {
         return Ok(());
     }
     *mkdir_calls += 1;

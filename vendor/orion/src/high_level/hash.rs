@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2020-2023 The orion Developers
+// Copyright (c) 2020-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,7 +44,7 @@
 //! # Security:
 //! - This interface does not support supplying BLAKE2b with a secret key, and
 //!   the hashes retrieved
-//! from using `orion::hash` are therefore not suitable as MACs.
+//!   from using `orion::hash` are therefore not suitable as MACs.
 //! - BLAKE2b is not suitable for password hashing. See [`orion::pwhash`](super::pwhash)
 //!   instead.
 //!

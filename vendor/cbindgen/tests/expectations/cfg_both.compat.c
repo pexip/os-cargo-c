@@ -96,9 +96,22 @@ typedef struct ConditionalField {
   ;
 } ConditionalField;
 
+typedef struct Normal {
+  int32_t x;
+  float y;
+} Normal;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
+
+#if defined(PLATFORM_WIN)
+extern int32_t global_array_with_different_sizes[2];
+#endif
+
+#if defined(PLATFORM_UNIX)
+extern int32_t global_array_with_different_sizes[1];
+#endif
 
 #if (defined(PLATFORM_UNIX) && defined(X11))
 void root(struct FooHandle a, union C c);
@@ -110,6 +123,14 @@ void root(struct BarHandle a, union C c);
 
 void cond(struct ConditionalField a);
 
+#if defined(PLATFORM_WIN)
+extern int32_t foo(void);
+#endif
+
+#if defined(PLATFORM_WIN)
+extern void bar(struct Normal a);
+#endif
+
 #ifdef __cplusplus
-} // extern "C"
-#endif // __cplusplus
+}  // extern "C"
+#endif  // __cplusplus

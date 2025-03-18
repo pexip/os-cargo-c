@@ -11,10 +11,16 @@
 
 [package]
 edition = "2018"
-rust-version = "1.70.0"
+rust-version = "1.80.0"
 name = "pasetors"
-version = "0.6.8"
+version = "0.7.2"
 authors = ["brycx <brycx@protonmail.com>"]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "PASETO: Platform-Agnostic Security Tokens (in Rust)"
 documentation = "https://docs.rs/pasetors"
 readme = "README.md"
@@ -39,6 +45,10 @@ rustdoc-args = [
     "docsrs",
 ]
 
+[lib]
+name = "pasetors"
+path = "src/lib.rs"
+
 [dependencies.ct-codecs]
 version = "1.1.1"
 default-features = false
@@ -50,8 +60,8 @@ optional = true
 default-features = false
 
 [dependencies.getrandom]
-version = "0.2"
-features = ["js"]
+version = "0.3"
+features = ["wasm_js"]
 
 [dependencies.orion]
 version = "0.17.0"

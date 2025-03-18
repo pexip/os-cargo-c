@@ -6,6 +6,7 @@
 // Std
 use std::borrow::Cow;
 use std::cmp;
+use std::collections::BTreeMap;
 
 // Internal
 use crate::builder::PossibleValue;
@@ -250,7 +251,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
 }
 
 /// Basic template methods
-impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
+impl HelpTemplate<'_, '_> {
     /// Writes binary name of a Parser Object to the wrapped stream.
     fn write_display_name(&mut self) {
         debug!("HelpTemplate::write_display_name");
@@ -364,7 +365,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
 }
 
 /// Arg handling
-impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
+impl HelpTemplate<'_, '_> {
     /// Writes help for all arguments (options, flags, args, subcommands)
     /// including titles of a Parser Object to the wrapped stream.
     pub(crate) fn write_all_args(&mut self) {
@@ -406,12 +407,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
                 .cmd
                 .get_subcommand_help_heading()
                 .unwrap_or(&default_help_heading);
-            let _ = write!(
-                self.writer,
-                "{}{help_heading}:{}\n",
-                header.render(),
-                header.render_reset()
-            );
+            let _ = write!(self.writer, "{header}{help_heading}:{header:#}\n",);
 
             self.write_subcommands(self.cmd);
         }
@@ -423,12 +419,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
             first = false;
             // Write positional args if any
             let help_heading = "Arguments";
-            let _ = write!(
-                self.writer,
-                "{}{help_heading}:{}\n",
-                header.render(),
-                header.render_reset()
-            );
+            let _ = write!(self.writer, "{header}{help_heading}:{header:#}\n",);
             self.write_args(&pos, "Arguments", positional_sort_key);
         }
 
@@ -438,12 +429,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
             }
             first = false;
             let help_heading = "Options";
-            let _ = write!(
-                self.writer,
-                "{}{help_heading}:{}\n",
-                header.render(),
-                header.render_reset()
-            );
+            let _ = write!(self.writer, "{header}{help_heading}:{header:#}\n",);
             self.write_args(&non_pos, "Options", option_sort_key);
         }
         if !custom_headings.is_empty() {
@@ -465,12 +451,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
                         self.writer.push_str("\n\n");
                     }
                     first = false;
-                    let _ = write!(
-                        self.writer,
-                        "{}{heading}:{}\n",
-                        header.render(),
-                        header.render_reset()
-                    );
+                    let _ = write!(self.writer, "{header}{heading}:{header:#}\n",);
                     self.write_args(&args, heading, option_sort_key);
                 }
             }
@@ -487,7 +468,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
         debug!("HelpTemplate::write_args {_category}");
         // The shortest an arg can legally be is 2 (i.e. '-x')
         let mut longest = 2;
-        let mut ord_v = Vec::new();
+        let mut ord_v = BTreeMap::new();
 
         // Determine the longest
         for &arg in args.iter().filter(|arg| {
@@ -506,9 +487,8 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
             }
 
             let key = (sort_key)(arg);
-            ord_v.push((key, arg));
+            ord_v.insert(key, arg);
         }
-        ord_v.sort_by(|a, b| a.0.cmp(&b.0));
 
         let next_line_help = self.will_args_wrap(args, longest);
 
@@ -554,12 +534,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
         let literal = &self.styles.get_literal();
 
         if let Some(s) = arg.get_short() {
-            let _ = write!(
-                self.writer,
-                "{}-{s}{}",
-                literal.render(),
-                literal.render_reset()
-            );
+            let _ = write!(self.writer, "{literal}-{s}{literal:#}",);
         } else if arg.get_long().is_some() {
             self.writer.push_str("    ");
         }
@@ -575,12 +550,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
             if arg.get_short().is_some() {
                 self.writer.push_str(", ");
             }
-            let _ = write!(
-                self.writer,
-                "{}--{long}{}",
-                literal.render(),
-                literal.render_reset()
-            );
+            let _ = write!(self.writer, "{literal}--{long}{literal:#}",);
         }
     }
 
@@ -650,7 +620,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
 
         let spaces = if next_line_help {
             TAB.len() + NEXT_LINE_INDENT.len()
-        } else if let Some(true) = arg.map(|a| a.is_positional()) {
+        } else if arg.map(|a| a.is_positional()).unwrap_or(true) {
             longest + TAB_WIDTH * 2
         } else {
             longest + TAB_WIDTH * 2 + 4 // See `fn short` for the 4
@@ -707,12 +677,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
                         let name = pv.get_name();
 
                         let mut descr = StyledStr::new();
-                        let _ = write!(
-                            &mut descr,
-                            "{}{name}{}",
-                            literal.render(),
-                            literal.render_reset()
-                        );
+                        let _ = write!(&mut descr, "{literal}{name}{literal:#}",);
                         if let Some(help) = pv.get_help() {
                             debug!("HelpTemplate::help: Possible Value help");
                             // To align help messages
@@ -882,7 +847,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
 }
 
 /// Subcommand handling
-impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
+impl HelpTemplate<'_, '_> {
     /// Writes help for subcommands of a Parser Object to the wrapped stream.
     fn write_flat_subcommands(&mut self, cmd: &Command, first: &mut bool) {
         debug!(
@@ -893,19 +858,17 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
         use std::fmt::Write as _;
         let header = &self.styles.get_header();
 
-        let mut ord_v = Vec::new();
+        let mut ord_v = BTreeMap::new();
         for subcommand in cmd
             .get_subcommands()
             .filter(|subcommand| should_show_subcommand(subcommand))
         {
-            ord_v.push((
-                subcommand.get_display_order(),
-                subcommand.get_name(),
+            ord_v.insert(
+                (subcommand.get_display_order(), subcommand.get_name()),
                 subcommand,
-            ));
+            );
         }
-        ord_v.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
-        for (_, _, subcommand) in ord_v {
+        for (_, subcommand) in ord_v {
             if !*first {
                 self.writer.push_str("\n\n");
             }
@@ -917,12 +880,7 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
                 .or_else(|| subcommand.get_long_about())
                 .unwrap_or_default();
 
-            let _ = write!(
-                self.writer,
-                "{}{heading}:{}\n",
-                header.render(),
-                header.render_reset()
-            );
+            let _ = write!(self.writer, "{header}{heading}:{header:#}\n",);
             if !about.is_empty() {
                 let _ = write!(self.writer, "{about}\n",);
             }
@@ -955,49 +913,33 @@ impl<'cmd, 'writer> HelpTemplate<'cmd, 'writer> {
 
         // The shortest an arg can legally be is 2 (i.e. '-x')
         let mut longest = 2;
-        let mut ord_v = Vec::new();
+        let mut ord_v = BTreeMap::new();
         for subcommand in cmd
             .get_subcommands()
             .filter(|subcommand| should_show_subcommand(subcommand))
         {
             let mut styled = StyledStr::new();
             let name = subcommand.get_name();
-            let _ = write!(
-                styled,
-                "{}{name}{}",
-                literal.render(),
-                literal.render_reset()
-            );
+            let _ = write!(styled, "{literal}{name}{literal:#}",);
             if let Some(short) = subcommand.get_short_flag() {
-                let _ = write!(
-                    styled,
-                    ", {}-{short}{}",
-                    literal.render(),
-                    literal.render_reset()
-                );
+                let _ = write!(styled, ", {literal}-{short}{literal:#}",);
             }
             if let Some(long) = subcommand.get_long_flag() {
-                let _ = write!(
-                    styled,
-                    ", {}--{long}{}",
-                    literal.render(),
-                    literal.render_reset()
-                );
+                let _ = write!(styled, ", {literal}--{long}{literal:#}",);
             }
             longest = longest.max(styled.display_width());
-            ord_v.push((subcommand.get_display_order(), styled, subcommand));
+            ord_v.insert((subcommand.get_display_order(), styled), subcommand);
         }
-        ord_v.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
 
         debug!("HelpTemplate::write_subcommands longest = {longest}");
 
         let next_line_help = self.will_subcommands_wrap(cmd.get_subcommands(), longest);
 
-        for (i, (_, sc_str, sc)) in ord_v.into_iter().enumerate() {
+        for (i, (sc_str, sc)) in ord_v.into_iter().enumerate() {
             if 0 < i {
                 self.writer.push_str("\n");
             }
-            self.write_subcommand(sc_str, sc, next_line_help, longest);
+            self.write_subcommand(sc_str.1, sc, next_line_help, longest);
         }
     }
 

@@ -7,7 +7,7 @@ use core::str::FromStr;
 use powerfmt::smart_display::{FormatterOptions, Metadata, SmartDisplay};
 
 use self::Month::*;
-use crate::error;
+use crate::{error, util};
 
 /// Months of the year.
 #[repr(u8)]
@@ -60,9 +60,19 @@ impl Month {
                 minimum: 1,
                 maximum: 12,
                 value: n as _,
-                conditional_range: false,
+                conditional_message: None,
             }),
         }
+    }
+
+    /// Get the number of days in the month of a given year.
+    ///
+    /// ```rust
+    /// # use time::Month;
+    /// assert_eq!(Month::February.length(2020), 29);
+    /// ```
+    pub const fn length(self, year: i32) -> u8 {
+        util::days_in_month(self, year)
     }
 
     /// Get the previous month.
@@ -256,7 +266,7 @@ impl TryFrom<u8> for Month {
                 minimum: 1,
                 maximum: 12,
                 value: 0,
-                conditional_range: false,
+                conditional_message: None,
             }),
         }
     }

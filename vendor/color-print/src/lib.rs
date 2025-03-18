@@ -5,11 +5,23 @@
 //!  - `cformat!(<FORMAT_STRING> [, ARGS...])`
 //!  - `cprint!(<FORMAT_STRING> [, ARGS...])`
 //!  - `cprintln!(<FORMAT_STRING> [, ARGS...])`
+//!  - `ceprint!(<FORMAT_STRING> [, ARGS...])`
+//!  - `ceprintln!(<FORMAT_STRING> [, ARGS...])`
+//!  - `cwrite!(f, <FORMAT_STRING> [, ARGS...])`
+//!  - `cwriteln!(f, <FORMAT_STRING> [, ARGS...])`
 //!  - `cstr!(<FORMAT_STRING>)`
 //!  - `untagged!(<FORMAT_STRING>)`
 //!
-//! [`cformat!()`], [`cprint!()`], and [`cprintln!()`] have the same syntax as `format!()`,
-//! `print!()` and `println!()` respectively, but they accept an additional syntax inside the
+//! The macros have the same syntax as their corresponding [`std`] variants:
+//! - [`cformat!()`] as [`format!()`]
+//! - [`cprint!()`] as [`print!()`]
+//! - [`cprintln!()`] as [`println!()`]
+//! - [`ceprint!()`] as [`eprint!()`]
+//! - [`ceprintln!()`] as [`eprintln!()`]
+//! - [`cwrite!()`] as [`write!()`]
+//! - [`cwriteln!()`] as [`writeln!()`]
+//!
+//! But they accept an additional syntax inside the
 //! format string: HTML-like tags which add ANSI colors/styles at compile-time.
 //!
 //! [`cstr!()`] only transforms the given string literal into another string literal, without
@@ -273,7 +285,9 @@
 //! | X    |          | `<0>`...`<255>` | `<palette(...)>`  | `<p(...)>` `<pal(...)>`                         |
 //! | X    |          | `<P(...)>` | `<bg:palette(...)>` | `<PALETTE(...)>` `<PAL(...)>` `<bg:p(...)>` `<bg:pal(...)>` |
 
-pub use color_print_proc_macro::{cformat, cprint, cprintln, cstr, untagged};
+pub use color_print_proc_macro::{
+    ceprint, ceprintln, cformat, cprint, cprintln, cstr, cwrite, cwriteln, untagged,
+};
 
 #[cfg(feature = "terminfo")]
 mod terminfo;
@@ -282,6 +296,8 @@ pub use terminfo::*;
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::*;
 
     #[cfg(feature = "terminfo")]
@@ -302,6 +318,22 @@ mod tests {
         assert_eq!(cformat!("Hi"), "Hi");
         assert_eq!(cformat!("Hi {}", 12), "Hi 12");
         assert_eq!(cformat!("Hi {n} {}", 12, n = 24), "Hi 24 12");
+
+        let mut s = String::new();
+        cwrite!(&mut s, "").unwrap();
+        assert_eq!(s, "");
+
+        let mut s = String::new();
+        cwrite!(&mut s, "Hi").unwrap();
+        assert_eq!(s, "Hi");
+
+        let mut s = String::new();
+        cwrite!(&mut s, "Hi {}", 12).unwrap();
+        assert_eq!(s, "Hi 12");
+
+        let mut s = String::new();
+        cwrite!(&mut s, "Hi {n} {}", 12, n = 24).unwrap();
+        assert_eq!(s, "Hi 24 12");
     }
 
     #[test]
@@ -345,6 +377,14 @@ mod tests {
                 \u{1b}[5mblink\u{1b}[25m
             "
         );
+
+        let mut s = String::new();
+        cwrite!(&mut s, "Hi <r>{v}</> {}", 12, v = "Hi").unwrap();
+        assert_eq!(s, "Hi \u{1b}[31mHi\u{1b}[39m 12");
+
+        let mut s = String::new();
+        cwriteln!(&mut s, "Hi <r>{v} {}", 12, v = "Hi").unwrap();
+        assert_eq!(s, "Hi \u{1b}[31mHi 12\u{1b}[39m\n");
     }
 
     #[test]
@@ -403,6 +443,10 @@ mod tests {
             cformat!("Hi <bold>word</bold> !"),
             format!("Hi {}word{} !", *BOLD, *CLEAR)
         );
+
+        let mut s = String::new();
+        cwrite!(&mut s, "<r>Hi</> {}", 12).unwrap();
+        assert_eq!(s, format!("{}Hi{} 12", *RED, *CLEAR));
     }
 
     #[test]

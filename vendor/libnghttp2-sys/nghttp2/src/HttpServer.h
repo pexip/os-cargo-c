@@ -37,7 +37,14 @@
 #include <map>
 #include <memory>
 
-#include <openssl/ssl.h>
+#include "ssl_compat.h"
+
+#ifdef NGHTTP2_OPENSSL_IS_WOLFSSL
+#  include <wolfssl/options.h>
+#  include <wolfssl/openssl/ssl.h>
+#else // !NGHTTP2_OPENSSL_IS_WOLFSSL
+#  include <openssl/ssl.h>
+#endif // !NGHTTP2_OPENSSL_IS_WOLFSSL
 
 #include <ev.h>
 
@@ -96,16 +103,16 @@ struct FileEntry {
             const std::string *content_type,
             const std::chrono::steady_clock::time_point &last_valid,
             bool stale = false)
-      : path(std::move(path)),
-        length(length),
-        mtime(mtime),
-        last_valid(last_valid),
-        content_type(content_type),
-        dlnext(nullptr),
-        dlprev(nullptr),
-        fd(fd),
-        usecount(1),
-        stale(stale) {}
+    : path(std::move(path)),
+      length(length),
+      mtime(mtime),
+      last_valid(last_valid),
+      content_type(content_type),
+      dlnext(nullptr),
+      dlprev(nullptr),
+      fd(fd),
+      usecount(1),
+      stale(stale) {}
   std::string path;
   std::multimap<std::string, std::unique_ptr<FileEntry>>::iterator it;
   int64_t length;
@@ -245,9 +252,10 @@ private:
   const Config *config_;
 };
 
-ssize_t file_read_callback(nghttp2_session *session, int32_t stream_id,
-                           uint8_t *buf, size_t length, uint32_t *data_flags,
-                           nghttp2_data_source *source, void *user_data);
+nghttp2_ssize file_read_callback(nghttp2_session *session, int32_t stream_id,
+                                 uint8_t *buf, size_t length,
+                                 uint32_t *data_flags,
+                                 nghttp2_data_source *source, void *user_data);
 
 } // namespace nghttp2
 

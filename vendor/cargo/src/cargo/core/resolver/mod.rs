@@ -137,10 +137,20 @@ pub fn resolve(
         _ => None,
     };
     let mut registry = RegistryQueryer::new(registry, replacements, version_prefs);
+
+    // Global cache of the reasons for each time we backtrack.
+    let mut past_conflicting_activations = conflict_cache::ConflictCache::new();
+
     let resolver_ctx = loop {
         let resolver_ctx = ResolverContext::new();
-        let resolver_ctx =
-            activate_deps_loop(resolver_ctx, &mut registry, summaries, first_version, gctx)?;
+        let resolver_ctx = activate_deps_loop(
+            resolver_ctx,
+            &mut registry,
+            summaries,
+            first_version,
+            gctx,
+            &mut past_conflicting_activations,
+        )?;
         if registry.reset_pending() {
             break resolver_ctx;
         } else {
@@ -194,13 +204,10 @@ fn activate_deps_loop(
     summaries: &[(Summary, ResolveOpts)],
     first_version: Option<VersionOrdering>,
     gctx: Option<&GlobalContext>,
+    past_conflicting_activations: &mut conflict_cache::ConflictCache,
 ) -> CargoResult<ResolverContext> {
     let mut backtrack_stack = Vec::new();
     let mut remaining_deps = RemainingDeps::new();
-
-    // `past_conflicting_activations` is a cache of the reasons for each time we
-    // backtrack.
-    let mut past_conflicting_activations = conflict_cache::ConflictCache::new();
 
     // Activate all the initial summaries to kick off some work.
     for (summary, opts) in summaries {
@@ -313,7 +320,7 @@ fn activate_deps_loop(
                     if let Some(c) = generalize_conflicting(
                         &resolver_ctx,
                         registry,
-                        &mut past_conflicting_activations,
+                        past_conflicting_activations,
                         &parent,
                         &dep,
                         &conflicting_activations,
@@ -439,13 +446,13 @@ fn activate_deps_loop(
                     // conflict with us.
                     let mut has_past_conflicting_dep = just_here_for_the_error_messages;
                     if !has_past_conflicting_dep {
-                        if let Some(conflicting) = frame
-                            .remaining_siblings
-                            .clone()
-                            .filter_map(|(ref new_dep, _, _)| {
-                                past_conflicting_activations.conflicting(&resolver_ctx, new_dep)
-                            })
-                            .next()
+                        if let Some(conflicting) =
+                            frame
+                                .remaining_siblings
+                                .remaining()
+                                .find_map(|(ref new_dep, _, _)| {
+                                    past_conflicting_activations.conflicting(&resolver_ctx, new_dep)
+                                })
                         {
                             // If one of our deps is known unresolvable
                             // then we will not succeed.
@@ -679,7 +686,7 @@ fn activate(
         Rc::make_mut(
             cx.resolve_features
                 .entry(candidate.package_id())
-                .or_insert_with(Rc::default),
+                .or_default(),
         )
         .extend(used_features);
     }
@@ -750,7 +757,7 @@ impl RemainingCandidates {
         conflicting_prev_active: &mut ConflictMap,
         cx: &ResolverContext,
     ) -> Option<(Summary, bool)> {
-        for b in self.remaining.by_ref() {
+        for b in self.remaining.iter() {
             let b_id = b.package_id();
             // The `links` key in the manifest dictates that there's only one
             // package in a dependency graph, globally, with that particular
@@ -776,7 +783,7 @@ impl RemainingCandidates {
             // Here we throw out our candidate if it's *compatible*, yet not
             // equal, to all previously activated versions.
             if let Some((a, _)) = cx.activations.get(&b_id.as_activations_key()) {
-                if *a != b {
+                if a != b {
                     conflicting_prev_active
                         .entry(a.package_id())
                         .or_insert(ConflictReason::Semver);
@@ -789,7 +796,7 @@ impl RemainingCandidates {
             // necessarily return the item just yet. Instead we stash it away to
             // get returned later, and if we replaced something then that was
             // actually the candidate to try first so we return that.
-            if let Some(r) = mem::replace(&mut self.has_another, Some(b)) {
+            if let Some(r) = mem::replace(&mut self.has_another, Some(b.clone())) {
                 return Some((r, true));
             }
         }
@@ -819,10 +826,6 @@ fn generalize_conflicting(
     )?;
     let backtrack_critical_reason: ConflictReason =
         conflicting_activations[&backtrack_critical_id].clone();
-
-    if backtrack_critical_reason.is_public_dependency() {
-        return None;
-    }
 
     if cx
         .parents
@@ -1004,69 +1007,57 @@ fn find_candidate(
 }
 
 fn check_cycles(resolve: &Resolve) -> CargoResult<()> {
-    // Create a simple graph representation alternative of `resolve` which has
-    // only the edges we care about. Note that `BTree*` is used to produce
-    // deterministic error messages here. Also note that the main reason for
-    // this copy of the resolve graph is to avoid edges between a crate and its
-    // dev-dependency since that doesn't count for cycles.
-    let mut graph = BTreeMap::new();
-    for id in resolve.iter() {
-        let map = graph.entry(id).or_insert_with(BTreeMap::new);
-        for (dep_id, listings) in resolve.deps_not_replaced(id) {
-            let transitive_dep = listings.iter().find(|d| d.is_transitive());
-
-            if let Some(transitive_dep) = transitive_dep.cloned() {
-                map.insert(dep_id, transitive_dep.clone());
-                resolve
-                    .replacement(dep_id)
-                    .map(|p| map.insert(p, transitive_dep));
-            }
-        }
-    }
-
-    // After we have the `graph` that we care about, perform a simple cycle
-    // check by visiting all nodes. We visit each node at most once and we keep
+    // Perform a simple cycle check by visiting all nodes.
+    // We visit each node at most once and we keep
     // track of the path through the graph as we walk it. If we walk onto the
     // same node twice that's a cycle.
-    let mut checked = HashSet::new();
-    let mut path = Vec::new();
-    let mut visited = HashSet::new();
-    for pkg in graph.keys() {
-        if !checked.contains(pkg) {
-            visit(&graph, *pkg, &mut visited, &mut path, &mut checked)?
+    let mut checked = HashSet::with_capacity(resolve.len());
+    let mut path = Vec::with_capacity(4);
+    let mut visited = HashSet::with_capacity(4);
+    for pkg in resolve.iter() {
+        if !checked.contains(&pkg) {
+            visit(&resolve, pkg, &mut visited, &mut path, &mut checked)?
         }
     }
     return Ok(());
 
     fn visit(
-        graph: &BTreeMap<PackageId, BTreeMap<PackageId, Dependency>>,
+        resolve: &Resolve,
         id: PackageId,
         visited: &mut HashSet<PackageId>,
         path: &mut Vec<PackageId>,
         checked: &mut HashSet<PackageId>,
     ) -> CargoResult<()> {
-        path.push(id);
         if !visited.insert(id) {
-            let iter = path.iter().rev().skip(1).scan(id, |child, parent| {
-                let dep = graph.get(parent).and_then(|adjacent| adjacent.get(child));
+            // We found a cycle and need to construct an error. Performance is no longer top priority.
+            let iter = path.iter().rev().scan(id, |child, parent| {
+                let dep = resolve.transitive_deps_not_replaced(*parent).find_map(
+                    |(dep_id, transitive_dep)| {
+                        (*child == dep_id || Some(*child) == resolve.replacement(dep_id))
+                            .then_some(transitive_dep)
+                    },
+                );
                 *child = *parent;
                 Some((parent, dep))
             });
             let iter = std::iter::once((&id, None)).chain(iter);
+            let describe_path = errors::describe_path(iter);
             anyhow::bail!(
-                "cyclic package dependency: package `{}` depends on itself. Cycle:\n{}",
-                id,
-                errors::describe_path(iter),
+                "cyclic package dependency: package `{id}` depends on itself. Cycle:\n{describe_path}"
             );
         }
 
         if checked.insert(id) {
-            for dep in graph[&id].keys() {
-                visit(graph, *dep, visited, path, checked)?;
+            path.push(id);
+            for (dep_id, _transitive_dep) in resolve.transitive_deps_not_replaced(id) {
+                visit(resolve, dep_id, visited, path, checked)?;
+                if let Some(replace_id) = resolve.replacement(dep_id) {
+                    visit(resolve, replace_id, visited, path, checked)?;
+                }
             }
+            path.pop();
         }
 
-        path.pop();
         visited.remove(&id);
         Ok(())
     }

@@ -1,5 +1,3 @@
-use gix_macros::momo;
-
 use crate::{
     bstr::{BStr, BString},
     config, remote, Remote,
@@ -34,7 +32,7 @@ impl Remote<'_> {
     /// from `config` would yield the same in-memory state.
     #[allow(clippy::result_large_err)]
     pub fn save_to(&self, config: &mut gix_config::File<'static>) -> Result<(), Error> {
-        fn as_key(name: &str) -> gix_config::parse::section::Key<'_> {
+        fn as_key(name: &str) -> gix_config::parse::section::ValueName<'_> {
             name.try_into().expect("valid")
         }
         let name = self.name().ok_or_else(|| Error::NameMissing {
@@ -111,7 +109,6 @@ impl Remote<'_> {
     /// If this name is different from the current one, the git configuration will still contain the previous name,
     /// and the caller should account for that.
     #[allow(clippy::result_large_err)]
-    #[momo]
     pub fn save_as_to(
         &mut self,
         name: impl Into<BString>,

@@ -1,16 +1,50 @@
+### 0.17.9
+
+**Date:** March 1, 2025.
+
+**Changelog:**
+- Add support for post-quantum ML-KEM from FIPS-203 ([#431](https://github.com/orion-rs/orion/pull/431)).
+- Add support for hybrid KEM X-Wing (draft06 version) ([#434](https://github.com/orion-rs/orion/issues/434)).
+- Implement `core::error::Error` instead of the `std`-version ([#440](https://github.com/orion-rs/orion/pull/440)).
+- Bump MSRV to `1.81.0`.
+- Update CI dependencies.
+
+### 0.17.8
+
+**Date:** January 27, 2025.
+
+**Changelog:**
+
+- Bump `getrandom` to `0.3.0`.
+- Update CI dependencies.
+
+### 0.17.7
+
+**Date:** September 10, 2024.
+
+**Changelog:**
+
+- Add support for SHAKE128 and SHAKE256 from FIPS 202 ([#398](https://github.com/orion-rs/orion/pull/398)).
+- Bump copyright year to 2024.
+- Bump MSRV to `1.80.0`.
+- Update CI dependencies.
+- SHA2: Switch from `checked_shl(3)` to `checked_mul(8)` during `increment_mlen()` (internal) ([#376](https://github.com/orion-rs/orion/issues/376)).
+
 ### 0.17.6
 
-__Date:__ September 19, 2023.
+**Date:** September 19, 2023.
 
-__Changelog:__
+**Changelog:**
+
 - Bump MSRV to `1.70.0`.
 - Bump `fiat-crypto` to `0.2.1`.
 
 ### 0.17.5
 
-__Date:__ July 4, 2023.
+**Date:** July 4, 2023.
 
-__Changelog:__
+**Changelog:**
+
 - Add `experimental` crate feature.
 - Add support for fully-committing AEAD variants based on CTX ([#324](https://github.com/orion-rs/orion/pull/324)).
 - Add support for SHA3 ([#327](https://github.com/orion-rs/orion/pull/327)).
@@ -19,9 +53,9 @@ __Changelog:__
 
 ### 0.17.4
 
-__Date:__ March 4, 2023.
+**Date:** March 4, 2023.
 
-__Changelog:__
+**Changelog:**
 
 - Update Wycheproof test vectors ([#320](https://github.com/orion-rs/orion/issues/320)).
 - Switch from `actions-rs/tarpaulin` to `cargo-tarpaulin` ([#322](https://github.com/orion-rs/orion/pull/322))
@@ -32,9 +66,9 @@ __Changelog:__
 
 ### 0.17.3
 
-__Date:__ December 7, 2022.
+**Date:** December 7, 2022.
 
-__Changelog:__
+**Changelog:**
 
 - Fix misuse issue in (X)ChaCha20 and (X)ChaCha20-Poly1305 APIs ([#308](https://github.com/orion-rs/orion/issues/308)).
 - Add benchmark check test without running any actual benchmarks ([#307](https://github.com/orion-rs/orion/pull/307)).
@@ -45,9 +79,9 @@ __Changelog:__
 
 ### 0.17.2
 
-__Date:__ August 16, 2022.
+**Date:** August 16, 2022.
 
-__Changelog:__
+**Changelog:**
 
 - BLAKE2b `Hasher` enum now implements `Debug + PartialEq` ([#278](https://github.com/orion-rs/orion/issues/278) (by [@black-eagle17](https://github.com/black-eagle17))).
 - Removed unmaintained `audit-check` and replaced with `cargo-deny` ([#292](https://github.com/orion-rs/orion/pull/292)).
@@ -55,9 +89,9 @@ __Changelog:__
 
 ### 0.17.1
 
-__Date:__ January 30, 2022.
+**Date:** January 30, 2022.
 
-__Changelog:__
+**Changelog:**
 
 - Use fiat-crypto from their provided crate on crates.io ([#201](https://github.com/orion-rs/orion/issues/201)) (by [Vince Mutolo](https://github.com/vlmutolo)).
 - Doc-tests no longer fail if run with `cargo test --no-default-features`, as the erroneous usages have been feature-gated ([#254](https://github.com/orion-rs/orion/issues/254)).
@@ -72,9 +106,9 @@ __Changelog:__
 
 ### 0.17.0
 
-__Date:__ November 24, 2021.
+**Date:** November 24, 2021.
 
-__Changelog:__
+**Changelog:**
 
 - [Breaking change] Keyed and non-keyed BLAKE2b have been split into two separate modules (`orion::hazardous::mac::blake2b` and `orion::hazardous::hash::blake2::blake2b` respectively). The keyed now returns a `Tag` instead of `Digest` ([#208](https://github.com/orion-rs/orion/issues/208)).
 - [Breaking change] `Tag`s (not only those used by BLAKE2b, but all) now implement `Drop` but no longer implement `Copy` ([#208](https://github.com/orion-rs/orion/issues/208)).
@@ -82,9 +116,9 @@ __Changelog:__
 
 ### 0.16.1
 
-__Date:__ November 3, 2021.
+**Date:** November 3, 2021.
 
-__Changelog:__
+**Changelog:**
 
 - Add support for X25519 using fiat-crypto Curve25519 field arithmetic (new modules `orion::hazardous::ecc` and `orion::kex`) ([#197](https://github.com/orion-rs/orion/pull/197)).
 - Implement serde `Serialize` and `Deserialize` for relevant types ([#192](https://github.com/orion-rs/orion/issues/192)) (by [Vince Mutolo](https://github.com/vlmutolo)).
@@ -102,9 +136,9 @@ __Changelog:__
 
 ### 0.16.0
 
-__Date:__ March 29, 2021.
+**Date:** March 29, 2021.
 
-__Changelog:__
+**Changelog:**
 
 - [Breaking change] Moved all libraries to the https://github.com/orion-rs organization and added [Vince Mutolo](https://github.com/vlmutolo) as a maintainer ([#191](https://github.com/orion-rs/orion/issues/191)).
 - [Breaking change] Use Argon2i parameters from PasswordHash in `pwhash::hash_password_verify()` ([#138](https://github.com/orion-rs/orion/issues/138)) (by [Vince Mutolo](https://github.com/vlmutolo)).
@@ -122,9 +156,9 @@ __Changelog:__
 
 ### 0.15.6
 
-__Date:__ February 9, 2021.
+**Date:** February 9, 2021.
 
-__Changelog:__
+**Changelog:**
 
 - The entire CI infrastructure has been moved to GitHub Actions (removing AppVeyor and Travis CI).
 - Add `cargo-deny` to CI jobs ([#174](https://github.com/brycx/orion/pull/174)).
@@ -140,18 +174,18 @@ __Changelog:__
 
 ### 0.15.5
 
-__Date:__ October 13, 2020.
+**Date:** October 13, 2020.
 
-__Changelog:__
+**Changelog:**
 
 - Documentation improvements.
 - Update `base64` to `0.13.0`.
 
 ### 0.15.4
 
-__Date:__ September 25, 2020.
+**Date:** September 25, 2020.
 
-__Changelog:__
+**Changelog:**
 
 - Empty plaintexts are now allowed for `hazardous::aead` ([#127](https://github.com/brycx/orion/pull/127)).
 - Update `getrandom` to `0.2`.
@@ -159,9 +193,9 @@ __Changelog:__
 
 ### 0.15.3
 
-__Date:__ August 8, 2020.
+**Date:** August 8, 2020.
 
-__Changelog:__
+**Changelog:**
 
 - Documentation improvements.
 - Argon2i is now available in a `no_std` context, using the new `alloc` feature ([#126](https://github.com/brycx/orion/pull/126)).
@@ -169,9 +203,9 @@ __Changelog:__
 
 ### 0.15.2
 
-__Date:__ June 7, 2020.
+**Date:** June 7, 2020.
 
-__Changelog:__
+**Changelog:**
 
 - Remove old `no_std` feature from CONTRIBUTING guidelines.
 - Improve documentation and code around HKDFs maximum output length.
@@ -181,18 +215,18 @@ __Changelog:__
 
 ### 0.15.1
 
-__Date:__ March 9, 2020.
+**Date:** March 9, 2020.
 
-__Changelog:__
+**Changelog:**
 
 - Update `base64` dependency from `0.11.0` to `0.12.0`.
 - Documentation improvements.
 
 ### 0.15.0
 
-__Date:__ February 25, 2020.
+**Date:** February 25, 2020.
 
-__Changelog:__
+**Changelog:**
 
 - [Breaking change] `secure_cmp` and all verification functions now return `Result<(), UnknownCryptoError>` instead of `Result<bool, UnknownCryptoError>` ([#97](https://github.com/brycx/orion/issues/97)).
 - [Breaking change] HChaCha20 is no longer public.
@@ -230,17 +264,17 @@ __Changelog:__
 
 ### 0.14.5 [Yanked]
 
-__Date:__ January 25, 2020.
+**Date:** January 25, 2020.
 
-__Changelog:__
+**Changelog:**
 
 - Fix `nightly` build breakage.
 
 ### 0.14.4 [Yanked]
 
-__Date:__ August 21, 2019.
+**Date:** August 21, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Reduce the amount of allocations throughout most of orion.
 - Vectorize the ChaCha20 implementation providing ~6% performance improvement for (X)ChaCha20Poly1305 and ~11.5% for (X)ChaCha20.
@@ -248,9 +282,9 @@ __Changelog:__
 
 ### 0.14.3 [Yanked]
 
-__Date:__ August 1, 2019.
+**Date:** August 1, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Improved performance for ChaCha20Poly1305/XChaCha20Poly1305 when AAD is empty.
 - Refactoring of streaming contexts used by SHA512, BLAKE2b and Poly1305.
@@ -261,29 +295,29 @@ __Changelog:__
 
 ### 0.14.2 [Yanked]
 
-__Date:__ June 10, 2019.
+**Date:** June 10, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Improved performance on all implementations, most notably: ~30% in ChaCha20/XChaCha20 and ~20% in ChaCha20Poly1305/XChaCha20Poly1305.
 - Updated `zeroize` dependency.
-- Testing WebAssembly (`wasm32-unknown-unknown`) support in CI. 
+- Testing WebAssembly (`wasm32-unknown-unknown`) support in CI.
 - Improved documentation.
 
 ### 0.14.1 [Yanked]
 
-__Date:__ May 27, 2019.
+**Date:** May 27, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Update `zeroize` dependency.
 - Improvements to documentation.
 
 ### 0.14.0 [Yanked]
 
-__Date:__ May 4, 2019.
+**Date:** May 4, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - [Breaking change] Function `as_bytes()` for public newtypes are replaced with `AsRef<>` trait implementations. This means all `as_bytes()` calls need to be replaced with `as_ref()`.
 - [Breaking change] The `SecretKey` for BLAKE2b is longer padded with zeroes to the length of the blocksize. Thus, the `SecretKey` no longer has a `get_original_length()` function, but the same result will be represented by the `get_length()` function instead.
@@ -303,17 +337,17 @@ __Changelog:__
 
 ### 0.13.4 [Yanked]
 
-__Date:__ April 1, 2019.
+**Date:** April 1, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Fix build for latest nightly.
 
 ### 0.13.3 [Yanked]
 
-__Date:__ March 31, 2019.
+**Date:** March 31, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Updated `zeroize` to `0.6.0`.
 - Added a small number of tests.
@@ -321,30 +355,30 @@ __Changelog:__
 
 ### 0.13.2 [Yanked]
 
-__Date:__ March 13, 2019.
+**Date:** March 13, 2019.
 
-__Changelog:__
+**Changelog:**
 
-- PBKDF2 and BLAKE2b now panic on lengths exceeding (2^32-1) * 64 and 2*(2^64-1), respectively.
+- PBKDF2 and BLAKE2b now panic on lengths exceeding (2^32-1) _ 64 and 2_(2^64-1), respectively.
 - ChaCha20 length constrictions are now equivalent to those of the RFC and panics on trying to process more than 2^32-1 keystream blocks.
 - Documentation improvements.
 - OpenSSL test vectors for BLAKE2b.
 
-__Note__: Strictly speaking, the first two changes are breaking, but because of the unlikeliness that this has an effect on anybody, they were not marked as such.
+**Note**: Strictly speaking, the first two changes are breaking, but because of the unlikeliness that this has an effect on anybody, they were not marked as such.
 
 ### 0.13.1 [Yanked]
 
-__Date:__ February 16, 2019.
+**Date:** February 16, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Documentation improvements ([#60](https://github.com/brycx/orion/issues/60)).
 
 ### 0.13.0 [Yanked]
 
-__Date:__ February 10, 2019.
+**Date:** February 10, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - [Breaking change]: `orion::hazardous::hash::sha512` previously used the same `Digest` as BLAKE2b. This is no longer the case, making it impossible to specify a non fixed-length hash as `Digest` with SHA512.
 - [Breaking change]: `HLEN` constant renamed to `SHA512_OUTSIZE` and `SHA2_BLOCKSIZE` constant renamed to `SHA512_BLOCKSIZE`.
@@ -354,27 +388,27 @@ __Changelog:__
 
 ### 0.12.6 [Yanked]
 
-__Date:__ February 8, 2019.
+**Date:** February 8, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Switched to zeroize in favor of clear_on_drop, such that using orion on stable Rust no longer requires a C compiler.
 - Fuzzing with honggfuzz-rs.
 
 ### 0.12.5 [Yanked]
 
-__Date:__ February 4, 2019.
+**Date:** February 4, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Refactored HMAC and improved performance for PBKDF2 by ~50%.
 - Removed `byteorder` dependency using instead the endianness conversion functions that came with Rust 1.32.
 
 ### 0.12.4 [Yanked]
 
-__Date:__ January 31, 2019.
+**Date:** January 31, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Fixes a bug where hashing, with BLAKE2b, over 2^64-1 bytes of data would cause an overflowing addition on debug builds.
 - Fixes a bug where hashing, with SHA512, over 2^64-1 bytes of data would not result in the counter being correctly incremented.
@@ -385,9 +419,9 @@ __Changelog:__
 
 ### 0.12.3 [Yanked]
 
-__Date:__ January 29, 2019.
+**Date:** January 29, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Improved compilation time.
 - Bugfix [#50](https://github.com/brycx/orion/issues/50).
@@ -395,28 +429,28 @@ __Changelog:__
 
 ### 0.12.2 [Yanked]
 
-__Date:__ January 26, 2019.
+**Date:** January 26, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Fix a [bug](https://github.com/brycx/orion/issues/52) that lead to panics when using `out` parameters, with `seal()`/`open()` in `hazardous`, with a length above a given point.
 
 ### 0.12.1 [Yanked]
 
-__Date:__ January 16, 2019.
+**Date:** January 16, 2019.
 
-__Changelog:__
+**Changelog:**
 
 - Switched `rand` dependency out with `rand_os`.
 
 ### 0.12.0 [Yanked]
 
-__Date:__ December 29, 2018.
+**Date:** December 29, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - [Breaking change]: All high-level functions now return a Result.
-- [Breaking change]: `Password` in `pbkdf2`, `SecretKey` and `hmac()` of `hmac` and `extract()` of `hkdf` in `hazardous` now return a Result. 
+- [Breaking change]: `Password` in `pbkdf2`, `SecretKey` and `hmac()` of `hmac` and `extract()` of `hkdf` in `hazardous` now return a Result.
 - [Breaking change]: Limit all `generate()` taking a `length` parameter, and `orion::kdf` calls to a length of less than `u32::max_value()` as maximum.
 - [Breaking change]: `orion::kdf` and `orion::pwhash` take a new `Password` parameter that is heap-allocated and returns a Result.
 - Removed `sha2` dependency and `ring` dev-dependency. `sha2` has been replaced with orion's own SHA512 implementation.
@@ -428,26 +462,26 @@ Thanks to Gabe Langlais for valuable feedback, especially on the API design.
 
 ### 0.11.2 [Yanked]
 
-__Date:__ December 22, 2018.
+**Date:** December 22, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Security fix: [#46](https://github.com/brycx/orion/issues/46) ([RUSTSEC-2018-0012](https://rustsec.org/advisories/RUSTSEC-2018-0012.html), [CVE-2018-20999](https://nvd.nist.gov/vuln/detail/CVE-2018-20999)).
 - Updated subtle dependency.
 
 ### 0.11.0 [Yanked]
 
-__Date:__ November 24, 2018.
+**Date:** November 24, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Fix [missing error propagation](https://github.com/brycx/orion/issues/40) in `v0.10`.
 
 ### 0.10.0 [Yanked]
 
-__Date:__ November 23, 2018.
+**Date:** November 23, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - New types for secret keys, nonces, tags, etc. This greatly increases misuse-resistance, usability and safety. To read more about the types and how they are implemented, see the [wiki section](https://github.com/brycx/orion/wiki/Design).
 - `default` API has been dropped. All high-level functionality is now accessible through these interfaces: `orion::aead`, `orion::auth`, `orion::kdf` and `orion::pwhash`.
@@ -467,22 +501,22 @@ __Changelog:__
 
 ### 0.9.1 [Yanked]
 
-__Date:__ November 11, 2018.
+**Date:** November 11, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Fix bug in double-HMAC verification in the default API
 - Documentation improvements
 
 ### 0.9.0 [Yanked]
 
-__Date:__ November 4, 2018.
+**Date:** November 4, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Added support for HChaCha20, XChaCha20 and AEAD XChaCha20Poly1305.
 - The `default` APIs encryption/decryption interface has been reintroduced, now offering
-authenticated encryption through the AEAD XChaCha20Poly1305 implementation.
+  authenticated encryption through the AEAD XChaCha20Poly1305 implementation.
 - Most of the library's structure has been revamped.
 - Major additions to the project wiki detailing testing and some information regarding dependencies and security.
 - Improved fuzzing targets and overall test suite.
@@ -490,9 +524,9 @@ authenticated encryption through the AEAD XChaCha20Poly1305 implementation.
 
 ### 0.8.0 [Yanked]
 
-__Date:__ October 7, 2018.
+**Date:** October 7, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Added AEAD ChaCha20Poly1305 from [RFC 8439](https://tools.ietf.org/html/rfc8439)
 - Added `keystream_block()` public function to retrieve a keystream from `chacha20`
@@ -503,42 +537,42 @@ __Changelog:__
 
 ### 0.7.4 [Yanked]
 
-__Date:__ September 27, 2018.
+**Date:** September 27, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Fix bug in PBKDF2 (See [issue](https://github.com/brycx/orion/issues/30))
 
 ### 0.7.3 [Yanked]
 
-__Date:__ September 26, 2018.
+**Date:** September 26, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Update `subtle` dependency
 
 ### 0.7.2 [Yanked]
 
-__Date:__ September 26, 2018.
+**Date:** September 26, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Fuzz test improvements
 - Documentation improvements
 
 ### 0.7.1 [Yanked]
 
-__Date:__ September 20, 2018.
+**Date:** September 20, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - `default::chacha20_*` initial counter set to 0
 
 ### 0.7.0 [Yanked]
 
-__Date:__ September 17, 2018.
+**Date:** September 17, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Added `FinalizationCryptoError` which means `cshake` and `hmac` now return a `Result` on finalization and update function calls.
 - Added the ChaCha20 algorithm from the [RCF 8439](https://tools.ietf.org/html/rfc8439).
@@ -549,45 +583,45 @@ __Changelog:__
 
 ### 0.6.1 [Yanked]
 
-__Date:__ September 5, 2018.
+**Date:** September 5, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Update `subtle` dependency
 
 ### 0.6.0 [Yanked]
 
-__Date:__ August 31, 2018.
+**Date:** August 31, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Fix: `byteorder` and `rand` imported correctly for `no_std`
-- Add default feature `safe_api`, meaning that for `no_std`, import orion with default features disabled 
+- Add default feature `safe_api`, meaning that for `no_std`, import orion with default features disabled
 - Due to dependency fixing, Double HMAC Verification is now only done in the `safe_api`
 - `gen_rand_key` now only available with `safe_api`
 
 ### 0.5.2 [Yanked]
 
-__Date:__ August 22, 2018.
+**Date:** August 22, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Replaced `byte-tools` with `byteorder` crate as `byte-tools` no longer offers the required functionality
 
 ### 0.5.1 [Yanked]
 
-__Date:__ August 20, 2018.
+**Date:** August 20, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Added `reset()` function to cSHAKE
 - Added finalization check for HMAC and cSHAKE, making it impossible to call finalization functions twice without a reset in between. Preventing misuse.
 
 ### 0.5.0 [Yanked]
 
-__Date:__ August 13, 2018.
+**Date:** August 13, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Support for SHA256, SHA384, SHA512/256 and cSHAKE128 dropped.
 - Support for `#![no_std]` added.
@@ -601,19 +635,19 @@ __Changelog:__
 - cSHAKE verification function removed from hazardous.
 
 Performance improvements compared to v0.4.3:
-	
+
 - HMAC: ~10% performance improvement
 - HKDF: ~5% performance improvement
 - PBKDF2: ~15% performance improvement
 - cSHAKE: ~11% performance improvement
 
-This was benchmarked on a MacBook Air 1,6 GHz Intel Core i5, 4GB. 
+This was benchmarked on a MacBook Air 1,6 GHz Intel Core i5, 4GB.
 
 ### 0.4.3 [Yanked]
 
-__Date:__ August 8, 2018.
+**Date:** August 8, 2018.
 
-__Changelog:__
+**Changelog:**
 
 - Updated dependency
 - Adopted faster HMAC key padding steps from `rigel` crate, avoiding allocation as before but without the `Cow` borrow

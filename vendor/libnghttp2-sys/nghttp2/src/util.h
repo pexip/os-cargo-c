@@ -46,6 +46,7 @@
 #include <chrono>
 #include <map>
 #include <random>
+#include <optional>
 
 #ifdef HAVE_LIBEV
 #  include <ev.h>
@@ -59,20 +60,20 @@
 
 namespace nghttp2 {
 
-constexpr auto NGHTTP2_H2_ALPN = StringRef::from_lit("\x2h2");
-constexpr auto NGHTTP2_H2 = StringRef::from_lit("h2");
+constexpr auto NGHTTP2_H2_ALPN = "\x2h2"_sr;
+constexpr auto NGHTTP2_H2 = "h2"_sr;
 
 // The additional HTTP/2 protocol ALPN protocol identifier we also
 // supports for our applications to make smooth migration into final
 // h2 ALPN ID.
-constexpr auto NGHTTP2_H2_16_ALPN = StringRef::from_lit("\x5h2-16");
-constexpr auto NGHTTP2_H2_16 = StringRef::from_lit("h2-16");
+constexpr auto NGHTTP2_H2_16_ALPN = "\x5h2-16"_sr;
+constexpr auto NGHTTP2_H2_16 = "h2-16"_sr;
 
-constexpr auto NGHTTP2_H2_14_ALPN = StringRef::from_lit("\x5h2-14");
-constexpr auto NGHTTP2_H2_14 = StringRef::from_lit("h2-14");
+constexpr auto NGHTTP2_H2_14_ALPN = "\x5h2-14"_sr;
+constexpr auto NGHTTP2_H2_14 = "h2-14"_sr;
 
-constexpr auto NGHTTP2_H1_1_ALPN = StringRef::from_lit("\x8http/1.1");
-constexpr auto NGHTTP2_H1_1 = StringRef::from_lit("http/1.1");
+constexpr auto NGHTTP2_H1_1_ALPN = "\x8http/1.1"_sr;
+constexpr auto NGHTTP2_H1_1 = "http/1.1"_sr;
 
 constexpr size_t NGHTTP2_MAX_UINT64_DIGITS = str_size("18446744073709551615");
 
@@ -185,24 +186,11 @@ OutputIt quote_string(OutputIt it, const StringRef &target) {
 // NUL byte.
 size_t quote_stringlen(const StringRef &target);
 
-std::string format_hex(const unsigned char *s, size_t len);
-
-template <size_t N> std::string format_hex(const unsigned char (&s)[N]) {
-  return format_hex(s, N);
-}
-
-template <size_t N> std::string format_hex(const std::array<uint8_t, N> &s) {
-  return format_hex(s.data(), s.size());
-}
-
-StringRef format_hex(BlockAllocator &balloc, const StringRef &s);
-
 static constexpr char LOWER_XDIGITS[] = "0123456789abcdef";
 
-template <typename OutputIt>
-OutputIt format_hex(OutputIt it, const StringRef &s) {
-  for (auto cc : s) {
-    uint8_t c = cc;
+template <std::weakly_incrementable OutputIt>
+OutputIt format_hex(OutputIt it, std::span<const uint8_t> s) {
+  for (auto c : s) {
     *it++ = LOWER_XDIGITS[c >> 4];
     *it++ = LOWER_XDIGITS[c & 0xf];
   }
@@ -210,10 +198,30 @@ OutputIt format_hex(OutputIt it, const StringRef &s) {
   return it;
 }
 
+template <typename T, size_t N = std::dynamic_extent,
+          std::weakly_incrementable OutputIt>
+OutputIt format_hex(OutputIt it, std::span<T, N> s) {
+  return format_hex(it, std::span<const uint8_t>{as_uint8_span(s)});
+}
+
+std::string format_hex(std::span<const uint8_t> s);
+
+template <typename T, size_t N = std::dynamic_extent>
+std::string format_hex(std::span<T, N> s) {
+  return format_hex(std::span<const uint8_t>{as_uint8_span(s)});
+}
+
+StringRef format_hex(BlockAllocator &balloc, std::span<const uint8_t> s);
+
+template <typename T, size_t N = std::dynamic_extent>
+StringRef format_hex(BlockAllocator &balloc, std::span<T, N> s) {
+  return format_hex(balloc, std::span<const uint8_t>{as_uint8_span(s)});
+}
+
 // decode_hex decodes hex string |s|, returns the decoded byte string.
 // This function assumes |s| is hex string, that is is_hex_string(s)
 // == true.
-StringRef decode_hex(BlockAllocator &balloc, const StringRef &s);
+std::span<const uint8_t> decode_hex(BlockAllocator &balloc, const StringRef &s);
 
 template <typename OutputIt>
 OutputIt decode_hex(OutputIt d_first, const StringRef &s) {
@@ -264,24 +272,24 @@ char upcase(char c);
 
 inline char lowcase(char c) {
   constexpr static unsigned char tbl[] = {
-      0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,
-      15,  16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,
-      30,  31,  32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,
-      45,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,
-      60,  61,  62,  63,  64,  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j',
-      'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y',
-      'z', 91,  92,  93,  94,  95,  96,  97,  98,  99,  100, 101, 102, 103, 104,
-      105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119,
-      120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134,
-      135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149,
-      150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164,
-      165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179,
-      180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194,
-      195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209,
-      210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224,
-      225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239,
-      240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254,
-      255,
+    0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,
+    15,  16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,
+    30,  31,  32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,
+    45,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,
+    60,  61,  62,  63,  64,  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j',
+    'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y',
+    'z', 91,  92,  93,  94,  95,  96,  97,  98,  99,  100, 101, 102, 103, 104,
+    105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119,
+    120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134,
+    135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149,
+    150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164,
+    165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179,
+    180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194,
+    195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209,
+    210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224,
+    225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239,
+    240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254,
+    255,
   };
   return tbl[static_cast<unsigned char>(c)];
 }
@@ -289,14 +297,12 @@ inline char lowcase(char c) {
 template <typename InputIterator1, typename InputIterator2>
 bool starts_with(InputIterator1 first1, InputIterator1 last1,
                  InputIterator2 first2, InputIterator2 last2) {
-  if (last1 - first1 < last2 - first2) {
-    return false;
-  }
-  return std::equal(first2, last2, first1);
+  return std::distance(first1, last1) >= std::distance(first2, last2) &&
+         std::equal(first2, last2, first1);
 }
 
 template <typename S, typename T> bool starts_with(const S &a, const T &b) {
-  return starts_with(a.begin(), a.end(), b.begin(), b.end());
+  return starts_with(std::begin(a), std::end(a), std::begin(b), std::end(b));
 }
 
 struct CaseCmp {
@@ -308,107 +314,60 @@ struct CaseCmp {
 template <typename InputIterator1, typename InputIterator2>
 bool istarts_with(InputIterator1 first1, InputIterator1 last1,
                   InputIterator2 first2, InputIterator2 last2) {
-  if (last1 - first1 < last2 - first2) {
-    return false;
-  }
-  return std::equal(first2, last2, first1, CaseCmp());
+  return std::distance(first1, last1) >= std::distance(first2, last2) &&
+         std::equal(first2, last2, first1, CaseCmp());
 }
 
 template <typename S, typename T> bool istarts_with(const S &a, const T &b) {
-  return istarts_with(a.begin(), a.end(), b.begin(), b.end());
-}
-
-template <typename T, typename CharT, size_t N>
-bool istarts_with_l(const T &a, const CharT (&b)[N]) {
-  return istarts_with(a.begin(), a.end(), b, b + N - 1);
+  return istarts_with(std::begin(a), std::end(a), std::begin(b), std::end(b));
 }
 
 template <typename InputIterator1, typename InputIterator2>
 bool ends_with(InputIterator1 first1, InputIterator1 last1,
                InputIterator2 first2, InputIterator2 last2) {
-  if (last1 - first1 < last2 - first2) {
-    return false;
-  }
-  return std::equal(first2, last2, last1 - (last2 - first2));
+  auto len1 = std::distance(first1, last1);
+  auto len2 = std::distance(first2, last2);
+
+  return len1 >= len2 && std::equal(first2, last2, first1 + (len1 - len2));
 }
 
 template <typename T, typename S> bool ends_with(const T &a, const S &b) {
-  return ends_with(a.begin(), a.end(), b.begin(), b.end());
-}
-
-template <typename T, typename CharT, size_t N>
-bool ends_with_l(const T &a, const CharT (&b)[N]) {
-  return ends_with(a.begin(), a.end(), b, b + N - 1);
+  return ends_with(std::begin(a), std::end(a), std::begin(b), std::end(b));
 }
 
 template <typename InputIterator1, typename InputIterator2>
 bool iends_with(InputIterator1 first1, InputIterator1 last1,
                 InputIterator2 first2, InputIterator2 last2) {
-  if (last1 - first1 < last2 - first2) {
-    return false;
-  }
-  return std::equal(first2, last2, last1 - (last2 - first2), CaseCmp());
+  auto len1 = std::distance(first1, last1);
+  auto len2 = std::distance(first2, last2);
+
+  return len1 >= len2 &&
+         std::equal(first2, last2, first1 + (len1 - len2), CaseCmp());
 }
 
 template <typename T, typename S> bool iends_with(const T &a, const S &b) {
-  return iends_with(a.begin(), a.end(), b.begin(), b.end());
-}
-
-template <typename T, typename CharT, size_t N>
-bool iends_with_l(const T &a, const CharT (&b)[N]) {
-  return iends_with(a.begin(), a.end(), b, b + N - 1);
+  return iends_with(std::begin(a), std::end(a), std::begin(b), std::end(b));
 }
 
 template <typename InputIt1, typename InputIt2>
 bool strieq(InputIt1 first1, InputIt1 last1, InputIt2 first2, InputIt2 last2) {
-  if (std::distance(first1, last1) != std::distance(first2, last2)) {
-    return false;
-  }
-
-  return std::equal(first1, last1, first2, CaseCmp());
+  return std::equal(first1, last1, first2, last2, CaseCmp());
 }
 
 template <typename T, typename S> bool strieq(const T &a, const S &b) {
-  return strieq(a.begin(), a.end(), b.begin(), b.end());
+  return strieq(std::begin(a), std::end(a), std::begin(b), std::end(b));
 }
 
-template <typename CharT, typename InputIt, size_t N>
-bool strieq_l(const CharT (&a)[N], InputIt b, size_t blen) {
-  return strieq(a, a + (N - 1), b, b + blen);
+template <typename T, typename S>
+bool strieq(const T &a, const S &b, size_t blen) {
+  return std::equal(std::begin(a), std::end(a), std::begin(b),
+                    std::next(std::begin(b), blen), CaseCmp());
 }
 
-template <typename CharT, size_t N, typename T>
-bool strieq_l(const CharT (&a)[N], const T &b) {
-  return strieq(a, a + (N - 1), b.begin(), b.end());
-}
-
-template <typename InputIt1, typename InputIt2>
-bool streq(InputIt1 first1, InputIt1 last1, InputIt2 first2, InputIt2 last2) {
-  if (std::distance(first1, last1) != std::distance(first2, last2)) {
-    return false;
-  }
-  return std::equal(first1, last1, first2);
-}
-
-template <typename T, typename S> bool streq(const T &a, const S &b) {
-  return streq(a.begin(), a.end(), b.begin(), b.end());
-}
-
-template <typename CharT, typename InputIt, size_t N>
-bool streq_l(const CharT (&a)[N], InputIt b, size_t blen) {
-  return streq(a, a + (N - 1), b, b + blen);
-}
-
-template <typename CharT, size_t N, typename T>
-bool streq_l(const CharT (&a)[N], const T &b) {
-  return streq(a, a + (N - 1), b.begin(), b.end());
-}
-
-// Returns true if |a| contains |b|.  If both |a| and |b| are empty,
-// this function returns false.
-template <typename S, typename T> bool strifind(const S &a, const T &b) {
-  return std::search(a.begin(), a.end(), b.begin(), b.end(), CaseCmp()) !=
-         a.end();
+template <typename T, typename S>
+bool streq(const T &a, const S &b, size_t blen) {
+  return std::equal(std::begin(a), std::end(a), std::begin(b),
+                    std::next(std::begin(b), blen));
 }
 
 template <typename InputIt> void inp_strlower(InputIt first, InputIt last) {
@@ -458,10 +417,10 @@ template <typename T, typename OutputIt> OutputIt utos(OutputIt dst, T n) {
 template <typename T>
 StringRef make_string_ref_uint(BlockAllocator &balloc, T n) {
   auto iov = make_byte_ref(balloc, NGHTTP2_MAX_UINT64_DIGITS + 1);
-  auto p = iov.base;
+  auto p = std::begin(iov);
   p = util::utos(p, n);
   *p = '\0';
-  return StringRef{iov.base, p};
+  return StringRef{std::span{std::begin(iov), p}};
 }
 
 template <typename T> std::string utos_unit(T n) {
@@ -640,7 +599,7 @@ std::vector<StringRef> split_str(const StringRef &s, char delim, size_t n);
 // terminated by NULL.
 template <typename T> StringRef format_common_log(char *out, const T &tp) {
   auto t =
-      std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch());
+    std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch());
   auto p = common_log_date(out, t.count());
   *p = '\0';
   return StringRef{out, p};
@@ -651,7 +610,7 @@ template <typename T> StringRef format_common_log(char *out, const T &tp) {
 // Expected type of |tp| is std::chrono::time_point
 template <typename T> std::string format_iso8601(const T &tp) {
   auto t = std::chrono::duration_cast<std::chrono::milliseconds>(
-      tp.time_since_epoch());
+    tp.time_since_epoch());
   return iso8601_date(t.count());
 }
 
@@ -663,7 +622,7 @@ template <typename T> std::string format_iso8601(const T &tp) {
 // the buffer pointed by |out|, and this string is terminated by NULL.
 template <typename T> StringRef format_iso8601(char *out, const T &tp) {
   auto t = std::chrono::duration_cast<std::chrono::milliseconds>(
-      tp.time_since_epoch());
+    tp.time_since_epoch());
   auto p = iso8601_date(out, t.count());
   *p = '\0';
   return StringRef{out, p};
@@ -677,7 +636,7 @@ template <typename T> StringRef format_iso8601(char *out, const T &tp) {
 // and this string is terminated by NULL.
 template <typename T> StringRef format_iso8601_basic(char *out, const T &tp) {
   auto t = std::chrono::duration_cast<std::chrono::milliseconds>(
-      tp.time_since_epoch());
+    tp.time_since_epoch());
   auto p = iso8601_basic_date(out, t.count());
   *p = '\0';
   return StringRef{out, p};
@@ -691,7 +650,7 @@ template <typename T> StringRef format_iso8601_basic(char *out, const T &tp) {
 // by NULL.
 template <typename T> StringRef format_http_date(char *out, const T &tp) {
   auto t =
-      std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch());
+    std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch());
   auto p = http_date(out, t.count());
   *p = '\0';
   return StringRef{out, p};
@@ -735,35 +694,22 @@ int get_socket_error(int fd);
 // Returns true if |host| is IPv6 numeric address (e.g., ::1)
 bool ipv6_numeric_addr(const char *host);
 
-// Parses NULL terminated string |s| as unsigned integer and returns
-// the parsed integer.  Additionally, if |s| ends with 'k', 'm', 'g'
-// and its upper case characters, multiply the integer by 1024, 1024 *
-// 1024 and 1024 * 1024 respectively.  If there is an error, returns
-// -1.
-int64_t parse_uint_with_unit(const char *s);
-// The following overload does not require |s| is NULL terminated.
-int64_t parse_uint_with_unit(const uint8_t *s, size_t len);
-int64_t parse_uint_with_unit(const StringRef &s);
+// Parses |s| as unsigned integer and returns the parsed integer.
+// Additionally, if |s| ends with 'k', 'm', 'g' and its upper case
+// characters, multiply the integer by 1024, 1024 * 1024 and 1024 *
+// 1024 respectively.  If there is an error, returns no value.
+std::optional<int64_t> parse_uint_with_unit(const StringRef &s);
 
-// Parses NULL terminated string |s| as unsigned integer and returns
-// the parsed integer.  If there is an error, returns -1.
-int64_t parse_uint(const char *s);
-// The following overload does not require |s| is NULL terminated.
-int64_t parse_uint(const uint8_t *s, size_t len);
-int64_t parse_uint(const std::string &s);
-int64_t parse_uint(const StringRef &s);
+// Parses |s| as unsigned integer and returns the parsed integer..
+std::optional<int64_t> parse_uint(const StringRef &s);
 
-// Parses NULL terminated string |s| as unsigned integer and returns
-// the parsed integer casted to double.  If |s| ends with "s", the
-// parsed value's unit is a second.  If |s| ends with "ms", the unit
-// is millisecond.  Similarly, it also supports 'm' and 'h' for
-// minutes and hours respectively.  If none of them are given, the
-// unit is second.  This function returns
-// std::numeric_limits<double>::infinity() if error occurs.
-double parse_duration_with_unit(const char *s);
-// The following overload does not require |s| is NULL terminated.
-double parse_duration_with_unit(const uint8_t *s, size_t len);
-double parse_duration_with_unit(const StringRef &s);
+// Parses |s| as unsigned integer and returns the parsed integer
+// casted to double.  If |s| ends with "s", the parsed value's unit is
+// a second.  If |s| ends with "ms", the unit is millisecond.
+// Similarly, it also supports 'm' and 'h' for minutes and hours
+// respectively.  If none of them are given, the unit is second.  This
+// function returns no value if error occurs.
+std::optional<double> parse_duration_with_unit(const StringRef &s);
 
 // Returns string representation of time duration |t|.  If t has
 // fractional part (at least more than or equal to 1e-3), |t| is
@@ -792,7 +738,7 @@ StringRef make_hostport(BlockAllocator &balloc, const StringRef &host,
 
 template <typename OutputIt>
 StringRef make_hostport(OutputIt first, const StringRef &host, uint16_t port) {
-  auto ipv6 = ipv6_numeric_addr(host.c_str());
+  auto ipv6 = ipv6_numeric_addr(host.data());
   auto serv = utos(port);
   auto p = first;
 
@@ -812,7 +758,7 @@ StringRef make_hostport(OutputIt first, const StringRef &host, uint16_t port) {
 
   *p = '\0';
 
-  return StringRef{first, p};
+  return StringRef{std::span{first, p}};
 }
 
 // Creates "host:port" string using given |host| and |port|.  If
@@ -828,7 +774,7 @@ StringRef make_http_hostport(OutputIt first, const StringRef &host,
     return make_hostport(first, host, port);
   }
 
-  auto ipv6 = ipv6_numeric_addr(host.c_str());
+  auto ipv6 = ipv6_numeric_addr(host.data());
   auto p = first;
 
   if (ipv6) {
@@ -843,7 +789,7 @@ StringRef make_http_hostport(OutputIt first, const StringRef &host,
 
   *p = '\0';
 
-  return StringRef{first, p};
+  return StringRef{std::span{first, p}};
 }
 
 // hexdump dumps |data| of length |datalen| in the format similar to
@@ -884,7 +830,7 @@ OutputIt random_alpha_digit(OutputIt first, OutputIt last, Generator &gen) {
   // If we use uint8_t instead char, gcc 6.2.0 complains by shouting
   // char-array initialized from wide string.
   static constexpr char s[] =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   std::uniform_int_distribution<> dis(0, 26 * 2 + 10 - 1);
   for (; first != last; ++first) {
     *first = s[dis(gen)];
@@ -909,13 +855,13 @@ void shuffle(RandomIt first, RandomIt last, Generator &&gen, SwapFun fun) {
     return;
   }
 
-  for (unsigned int i = 0; i < static_cast<unsigned int>(len - 1); ++i) {
-    auto dis = std::uniform_int_distribution<unsigned int>(i, len - 1);
-    auto j = dis(gen);
-    if (i == j) {
-      continue;
-    }
-    fun(first + i, first + j);
+  using dist_type = std::uniform_int_distribution<size_t>;
+  using param_type = dist_type::param_type;
+
+  dist_type d;
+
+  for (decltype(len) i = 0; i < len - 1; ++i) {
+    fun(first + i, first + d(gen, param_type(i, len - 1)));
   }
 }
 

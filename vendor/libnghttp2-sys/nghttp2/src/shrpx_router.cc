@@ -34,7 +34,7 @@ namespace shrpx {
 RNode::RNode() : s(nullptr), len(0), index(-1), wildcard_index(-1) {}
 
 RNode::RNode(const char *s, size_t len, ssize_t index, ssize_t wildcard_index)
-    : s(s), len(len), index(index), wildcard_index(wildcard_index) {}
+  : s(s), len(len), index(index), wildcard_index(wildcard_index) {}
 
 Router::Router() : balloc_(1024, 1024), root_{} {}
 
@@ -67,7 +67,7 @@ void Router::add_node(RNode *node, const char *pattern, size_t patlen,
                       ssize_t index, ssize_t wildcard_index) {
   auto pat = make_string_ref(balloc_, StringRef{pattern, patlen});
   auto new_node =
-      std::make_unique<RNode>(pat.c_str(), pat.size(), index, wildcard_index);
+    std::make_unique<RNode>(pat.data(), pat.size(), index, wildcard_index);
   add_next_node(node, std::move(new_node));
 }
 
@@ -85,7 +85,7 @@ size_t Router::add_route(const StringRef &pattern, size_t idx, bool wildcard) {
   for (;;) {
     auto next_node = find_next_node(node, pattern[i]);
     if (next_node == nullptr) {
-      add_node(node, pattern.c_str() + i, pattern.size() - i, index,
+      add_node(node, pattern.data() + i, pattern.size() - i, index,
                wildcard_index);
       return idx;
     }
@@ -93,7 +93,7 @@ size_t Router::add_route(const StringRef &pattern, size_t idx, bool wildcard) {
     node = next_node;
 
     auto slen = pattern.size() - i;
-    auto s = pattern.c_str() + i;
+    auto s = pattern.data() + i;
     auto n = std::min(node->len, slen);
     size_t j;
     for (j = 0; j < n && node->s[j] == s[j]; ++j)
@@ -132,7 +132,7 @@ size_t Router::add_route(const StringRef &pattern, size_t idx, bool wildcard) {
       // node must be split into 2 nodes.  new_node is now the child
       // of node.
       auto new_node = std::make_unique<RNode>(
-          &node->s[j], node->len - j, node->index, node->wildcard_index);
+        &node->s[j], node->len - j, node->index, node->wildcard_index);
       std::swap(node->next, new_node->next);
 
       node->len = j;
@@ -151,7 +151,7 @@ size_t Router::add_route(const StringRef &pattern, size_t idx, bool wildcard) {
     i += j;
 
     assert(pattern.size() > i);
-    add_node(node, pattern.c_str() + i, pattern.size() - i, index,
+    add_node(node, pattern.data() + i, pattern.size() - i, index,
              wildcard_index);
 
     return idx;
@@ -395,7 +395,7 @@ ssize_t Router::match_prefix(size_t *nread, const RNode **last_node,
   }
 
   auto node =
-      ::shrpx::match_prefix(nread, *last_node, std::begin(s), std::end(s));
+    ::shrpx::match_prefix(nread, *last_node, std::begin(s), std::end(s));
   if (node == nullptr) {
     return -1;
   }

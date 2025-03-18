@@ -45,7 +45,11 @@ mod config;
 mod declarationtyperesolver;
 mod dependencies;
 mod error;
+#[cfg(feature = "unstable_ir")]
+pub mod ir;
+#[cfg(not(feature = "unstable_ir"))]
 mod ir;
+mod language_backend;
 mod library;
 mod mangle;
 mod monomorph;

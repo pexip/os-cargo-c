@@ -15,7 +15,7 @@ impl crate::Repository {
     ) -> Self {
         setup_objects(&mut objects, &config);
         crate::Repository {
-            bufs: RefCell::new(Vec::with_capacity(4)),
+            bufs: Some(RefCell::new(Vec::with_capacity(4))),
             work_tree,
             common_dir,
             objects,
@@ -44,7 +44,7 @@ pub(crate) fn setup_objects(objects: &mut crate::OdbHandle, config: &crate::conf
             None => match config.static_pack_cache_limit_bytes {
                 None => objects.set_pack_cache(|| Box::<gix_pack::cache::lru::StaticLinkedList<64>>::default()),
                 Some(limit) => {
-                    objects.set_pack_cache(move || Box::new(gix_pack::cache::lru::StaticLinkedList::<64>::new(limit)))
+                    objects.set_pack_cache(move || Box::new(gix_pack::cache::lru::StaticLinkedList::<64>::new(limit)));
                 }
             },
             Some(0) => objects.unset_pack_cache(),

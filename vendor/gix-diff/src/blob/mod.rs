@@ -6,11 +6,9 @@ use bstr::BString;
 pub use imara_diff::*;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod pipeline;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod platform;
 
 /// Information about the diff performed to detect similarity.
@@ -119,6 +117,8 @@ pub struct Platform {
     /// That way, expensive rewrite-checks with NxM matrix checks would be as fast as possible,
     /// avoiding duplicate work.
     diff_cache: HashMap<platform::CacheKey, platform::CacheValue>,
+    /// A list of previously used buffers, ready for re-use.
+    free_list: Vec<Vec<u8>>,
 }
 
 mod impls {

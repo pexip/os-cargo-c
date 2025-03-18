@@ -10,20 +10,39 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2018"
+edition = "2021"
+rust-version = "1.73"
 name = "kstring"
-version = "2.0.0"
+version = "2.0.2"
 authors = ["Ed Page <eopage@gmail.com>"]
-include = ["build.rs", "src/**/*", "Cargo.toml", "LICENSE*", "README.md", "benches/**/*", "examples/**/*"]
+build = false
+include = [
+    "build.rs",
+    "src/**/*",
+    "Cargo.toml",
+    "Cargo.lock",
+    "LICENSE*",
+    "README.md",
+    "benches/**/*",
+    "examples/**/*",
+]
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Key String: optimized for map keys"
 documentation = "https://docs.rs/kstring"
 readme = "README.md"
-keywords = ["serde", "serialization", "string"]
-categories = ["data-structures", "text-processing"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/cobalt-org/kstring"
+
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = [
+    "--cfg",
+    "docsrs",
+]
+
 [[package.metadata.release.pre-release-replacements]]
 file = "CHANGELOG.md"
 min = 1
@@ -34,7 +53,7 @@ search = "Unreleased"
 exactly = 1
 file = "CHANGELOG.md"
 replace = "...{{tag_name}}"
-search = "\\.\\.\\.HEAD"
+search = '\.\.\.HEAD'
 
 [[package.metadata.release.pre-release-replacements]]
 file = "CHANGELOG.md"
@@ -45,24 +64,41 @@ search = "ReleaseDate"
 [[package.metadata.release.pre-release-replacements]]
 exactly = 1
 file = "CHANGELOG.md"
-replace = "<!-- next-header -->\n## [Unreleased] - ReleaseDate\n"
+replace = """
+<!-- next-header -->
+## [Unreleased] - ReleaseDate
+"""
 search = "<!-- next-header -->"
 
 [[package.metadata.release.pre-release-replacements]]
 exactly = 1
 file = "CHANGELOG.md"
-replace = "<!-- next-url -->\n[Unreleased]: https://github.com/cobalt-org/kstring/compare/{{tag_name}}...HEAD"
+replace = """
+<!-- next-url -->
+[Unreleased]: https://github.com/cobalt-org/kstring/compare/{{tag_name}}...HEAD"""
 search = "<!-- next-url -->"
+
 [profile.release]
 debug = 1
 
-[[bench]]
-name = "clone"
-harness = false
+[lib]
+name = "kstring"
+path = "src/lib.rs"
+
+[[example]]
+name = "bench"
+path = "examples/bench.rs"
 
 [[bench]]
 name = "access"
+path = "benches/access.rs"
 harness = false
+
+[[bench]]
+name = "clone"
+path = "benches/clone.rs"
+harness = false
+
 [dependencies.document-features]
 version = "0.2"
 optional = true
@@ -73,15 +109,19 @@ optional = true
 
 [dependencies.static_assertions]
 version = "1.1.0"
+
 [dev-dependencies.criterion]
-version = "0.3"
+version = "0.5"
 
 [dev-dependencies.proptest]
-version = "1.0.0"
+version = "1.4.0"
 
 [features]
 arc = []
-default = ["std", "unsafe"]
+default = [
+    "std",
+    "unsafe",
+]
 max_inline = []
 std = []
 unsafe = []

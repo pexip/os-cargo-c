@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2018-2023 The orion Developers
+// Copyright (c) 2018-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,5 +27,6 @@ pub mod hkdf;
 pub mod pbkdf2;
 
 #[cfg(any(feature = "safe_api", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "safe_api", feature = "alloc"))))]
 /// Argon2i password hashing function as described in the [P-H-C specification](https://github.com/P-H-C/phc-winner-argon2/blob/master/argon2-specs.pdf).
 pub mod argon2i;

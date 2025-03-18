@@ -1,7 +1,7 @@
 use libc::c_int;
 use std::env::JoinPathsError;
 use std::error;
-use std::ffi::{CStr, NulError};
+use std::ffi::{CStr, CString, NulError};
 use std::fmt;
 use std::str;
 
@@ -12,7 +12,7 @@ use crate::{raw, ErrorClass, ErrorCode};
 pub struct Error {
     code: c_int,
     klass: c_int,
-    message: String,
+    message: Box<str>,
 }
 
 impl Error {
@@ -70,7 +70,7 @@ impl Error {
 
     unsafe fn from_raw(code: c_int, ptr: *const raw::git_error) -> Error {
         let message = CStr::from_ptr((*ptr).message as *const _).to_bytes();
-        let message = String::from_utf8_lossy(message).into_owned();
+        let message = String::from_utf8_lossy(message).into_owned().into();
         Error {
             code,
             klass: (*ptr).klass,
@@ -86,7 +86,7 @@ impl Error {
         Error {
             code: raw::GIT_ERROR as c_int,
             klass: raw::GIT_ERROR_NONE as c_int,
-            message: s.to_string(),
+            message: s.into(),
         }
     }
 
@@ -128,6 +128,7 @@ impl Error {
             raw::GIT_EINDEXDIRTY => super::ErrorCode::IndexDirty,
             raw::GIT_EAPPLYFAIL => super::ErrorCode::ApplyFail,
             raw::GIT_EOWNER => super::ErrorCode::Owner,
+            raw::GIT_TIMEOUT => super::ErrorCode::Timeout,
             _ => super::ErrorCode::GenericError,
         }
     }
@@ -165,6 +166,7 @@ impl Error {
             ErrorCode::IndexDirty => raw::GIT_EINDEXDIRTY,
             ErrorCode::ApplyFail => raw::GIT_EAPPLYFAIL,
             ErrorCode::Owner => raw::GIT_EOWNER,
+            ErrorCode::Timeout => raw::GIT_TIMEOUT,
         };
     }
 
@@ -296,6 +298,7 @@ impl Error {
             GIT_EINDEXDIRTY,
             GIT_EAPPLYFAIL,
             GIT_EOWNER,
+            GIT_TIMEOUT,
         )
     }
 
@@ -349,6 +352,17 @@ impl Error {
     /// Return the message associated with this error
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// A low-level convenience to call [`raw::git_error_set_str`] with the
+    /// information from this error.
+    ///
+    /// Returns the [`Error::raw_code`] value of this error, which is often
+    /// needed from a C callback.
+    pub(crate) unsafe fn raw_set_git_error(&self) -> raw::git_error_code {
+        let s = CString::new(self.message()).unwrap();
+        raw::git_error_set_str(self.class() as c_int, s.as_ptr());
+        self.raw_code()
     }
 }
 

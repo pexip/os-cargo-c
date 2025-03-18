@@ -1,14 +1,40 @@
-use std::cmp::Ordering;
-
 use crate::{
     bstr::{BStr, BString},
-    tree,
+    tree, Tree, TreeRef,
 };
+use std::cell::RefCell;
+use std::cmp::Ordering;
+
+///
+pub mod editor;
 
 mod ref_iter;
 ///
-#[allow(clippy::empty_docs)]
 pub mod write;
+
+/// The state needed to apply edits instantly to in-memory trees.
+///
+/// It's made so that each tree is looked at in the object database at most once, and held in memory for
+/// all edits until everything is flushed to write all changed trees.
+///
+/// The editor is optimized to edit existing trees, but can deal with building entirely new trees as well
+/// with some penalties.
+#[doc(alias = "TreeUpdateBuilder", alias = "git2")]
+#[derive(Clone)]
+pub struct Editor<'a> {
+    /// A way to lookup trees.
+    find: &'a dyn crate::FindExt,
+    /// The kind of hashes to produce
+    object_hash: gix_hash::Kind,
+    /// All trees we currently hold in memory. Each of these may change while adding and removing entries.
+    /// null-object-ids mark tree-entries whose value we don't know yet, they are placeholders that will be
+    /// dropped when writing at the latest.
+    trees: std::collections::HashMap<BString, Tree>,
+    /// A buffer to build up paths when finding the tree to edit.
+    path_buf: RefCell<BString>,
+    /// Our buffer for storing tree-data in, right before decoding it.
+    tree_buf: Vec<u8>,
+}
 
 /// The mode of items storable in a tree, similar to the file mode on a unix file system.
 ///
@@ -16,9 +42,15 @@ pub mod write;
 ///
 /// Note that even though it can be created from any `u16`, it should be preferable to
 /// create it by converting [`EntryKind`] into `EntryMode`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Ord, PartialOrd, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EntryMode(pub u16);
+
+impl std::fmt::Debug for EntryMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EntryMode({:#o})", self.0)
+    }
+}
 
 /// A discretized version of ideal and valid values for entry modes.
 ///
@@ -169,6 +201,21 @@ impl EntryMode {
     }
 }
 
+impl TreeRef<'_> {
+    /// Convert this instance into its own version, creating a copy of all data.
+    ///
+    /// This will temporarily allocate an extra copy in memory, so at worst three copies of the tree exist
+    /// at some intermediate point in time. Use [`Self::into_owned()`] to avoid this.
+    pub fn to_owned(&self) -> Tree {
+        self.clone().into()
+    }
+
+    /// Convert this instance into its own version, creating a copy of all data.
+    pub fn into_owned(self) -> Tree {
+        self.into()
+    }
+}
+
 /// An element of a [`TreeRef`][crate::TreeRef::entries].
 #[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -184,13 +231,13 @@ pub struct EntryRef<'a> {
     pub oid: &'a gix_hash::oid,
 }
 
-impl<'a> PartialOrd for EntryRef<'a> {
+impl PartialOrd for EntryRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'a> Ord for EntryRef<'a> {
+impl Ord for EntryRef<'_> {
     fn cmp(&self, b: &Self) -> Ordering {
         let a = self;
         let common = a.filename.len().min(b.filename.len());
@@ -202,7 +249,7 @@ impl<'a> Ord for EntryRef<'a> {
     }
 }
 
-/// An entry in a [`Tree`][crate::Tree], similar to an entry in a directory.
+/// An entry in a [`Tree`], similar to an entry in a directory.
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Entry {

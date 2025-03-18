@@ -1,7 +1,9 @@
 //! Tests for `[lints]`
 
+use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::registry::Package;
+use cargo_test_support::str;
 
 #[cargo_test]
 fn dependency_warning_ignored() {
@@ -41,14 +43,13 @@ fn dependency_warning_ignored() {
         .build();
 
     foo.cargo("check")
-        .with_stderr(
-            "\
-[LOCKING] 2 packages to latest compatible versions
-[CHECKING] [..]
-[CHECKING] [..]
-[FINISHED] [..]
-",
-        )
+        .with_stderr_data(str![[r#"
+[LOCKING] 1 package to latest compatible version
+[CHECKING] bar v0.0.1 ([ROOT]/bar)
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 }
 
@@ -72,16 +73,15 @@ fn malformed_on_stable() {
 
     foo.cargo("check")
         .with_status(101)
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [ERROR] invalid type: integer `20`, expected a lints table
  --> Cargo.toml:2:25
   |
 2 |                 lints = 20
   |                         ^^
   |
-",
-        )
+
+"#]])
         .run();
 }
 
@@ -104,17 +104,13 @@ fn fail_on_invalid_tool() {
         .file("src/lib.rs", "")
         .build();
 
-    foo.cargo("check")
-        .with_status(101)
-        .with_stderr(
-            "\
-[..]
+    foo.cargo("check").with_stderr_data(str![[r#"
+[WARNING] [ROOT]/foo/Cargo.toml: unrecognized lint tool `lints.super-awesome-linter`, specifying unrecognized tools may break in the future.
+supported tools: cargo, clippy, rust, rustdoc
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
-Caused by:
-  unsupported `super-awesome-linter` in `[lints]`, must be one of cargo, clippy, rust, rustdoc
-",
-        )
-        .run();
+"#]]).run();
 }
 
 #[cargo_test]
@@ -137,16 +133,15 @@ fn invalid_type_in_lint_value() {
 
     foo.cargo("check")
         .with_status(101)
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [ERROR] invalid type: integer `-1`, expected a string or map
  --> Cargo.toml:8:36
   |
 8 |                 rust-2018-idioms = -1
   |                                    ^^
   |
-",
-        )
+
+"#]])
         .run();
 }
 
@@ -171,14 +166,13 @@ fn warn_on_unused_key() {
         .build();
 
     foo.cargo("check")
-        .with_stderr(
-            "\
-[WARNING] [CWD]/Cargo.toml: unused manifest key: lints.rust.rust-2018-idioms.unused
-[WARNING] [CWD]/Cargo.toml: unused manifest key: workspace.lints.rust.rust-2018-idioms.unused
-[CHECKING] foo v0.0.1 ([CWD])
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]s
-",
-        )
+        .with_stderr_data(str![[r#"
+[WARNING] [ROOT]/foo/Cargo.toml: unused manifest key: `lints.rust.rust-2018-idioms.unused`
+[WARNING] [ROOT]/foo/Cargo.toml: unused manifest key: `lints.rust.rust-2018-idioms.unused`
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 }
 
@@ -203,14 +197,13 @@ fn fail_on_tool_injection() {
 
     foo.cargo("check")
         .with_status(101)
-        .with_stderr(
-            "\
-[..]
+        .with_stderr_data(str![[r#"
+[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
 
 Caused by:
   `lints.rust.clippy::cyclomatic_complexity` is not valid lint name; try `lints.clippy.cyclomatic_complexity`
-",
-        )
+
+"#]])
         .run();
 }
 
@@ -235,14 +228,13 @@ fn fail_on_redundant_tool() {
 
     foo.cargo("check")
         .with_status(101)
-        .with_stderr(
-            "\
-[..]
+        .with_stderr_data(str![[r#"
+[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
 
 Caused by:
   `lints.rust.rust::unsafe_code` is not valid lint name; try `lints.rust.unsafe_code`
-",
-        )
+
+"#]])
         .run();
 }
 
@@ -267,14 +259,13 @@ fn fail_on_conflicting_tool() {
 
     foo.cargo("check")
         .with_status(101)
-        .with_stderr(
-            "\
-[..]
+        .with_stderr_data(str![[r#"
+[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
 
 Caused by:
   `lints.rust.super-awesome-tool::unsafe_code` is not a valid lint name
-",
-        )
+
+"#]])
         .run();
 }
 
@@ -306,11 +297,11 @@ pub fn foo(num: i32) -> u32 {
 
     foo.cargo("check")
         .with_status(101)
-        .with_stderr_contains(
-            "\
-error: usage of an `unsafe` block
-",
-        )
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[ERROR] usage of an `unsafe` block
+...
+"#]])
         .run();
 }
 
@@ -345,16 +336,15 @@ pub fn foo(num: i32) -> u32 {
 
     foo.cargo("check")
         .with_status(101)
-        .with_stderr_contains(
-            "\
-error: `workspace` cannot be false
+        .with_stderr_data(str![[r#"
+[ERROR] `workspace` cannot be false
  --> Cargo.toml:9:29
   |
 9 |                 workspace = false
   |                             ^^^^^
   |
-",
-        )
+
+"#]])
         .run();
 }
 
@@ -389,11 +379,11 @@ pub fn foo(num: i32) -> u32 {
 
     foo.cargo("check")
         .with_status(101)
-        .with_stderr_contains(
-            "\
-error: usage of an `unsafe` block
-",
-        )
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[ERROR] usage of an `unsafe` block
+...
+"#]])
         .run();
 }
 
@@ -430,14 +420,13 @@ pub fn foo(num: i32) -> u32 {
 
     foo.cargo("check")
         .with_status(101)
-        .with_stderr(
-            "\
-[ERROR] failed to parse manifest at `[CWD]/Cargo.toml`
+        .with_stderr_data(str![[r#"
+[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
 
 Caused by:
   cannot override `workspace.lints` in `lints`, either remove the overrides or `lints.workspace = true` and manually specify the lints
-",
-        )
+
+"#]])
         .run();
 }
 
@@ -615,11 +604,11 @@ pub fn foo() -> u32 {
 
     foo.cargo("check")
         .with_status(101)
-        .with_stderr_contains(
-            "\
-error: unused extern crate
-",
-        )
+        .with_stderr_data(str![[r#"
+...
+[ERROR] unused extern crate
+...
+"#]])
         .run();
 }
 
@@ -688,11 +677,11 @@ pub fn foo() -> u32 {
 
     foo.cargo("doc")
         .with_status(101)
-        .with_stderr_contains(
-            "\
-error: unresolved link to `bar`
-",
-        )
+        .with_stderr_data(str![[r#"
+[DOCUMENTING] foo v0.0.1 ([ROOT]/foo)
+[ERROR] unresolved link to `bar`
+...
+"#]])
         .run();
 }
 
@@ -731,22 +720,20 @@ pub const Ĕ: i32 = 2;
         .build();
 
     foo.cargo("check")
-        .with_stderr(
-            "\
-[CHECKING] foo v0.0.1 ([CWD])
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]s
-",
-        )
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 
     foo.cargo("test --doc")
-        .with_stderr(
-            "\
-[COMPILING] foo v0.0.1 ([CWD])
-[FINISHED] `test` profile [unoptimized + debuginfo] target(s) in [..]s
+        .with_stderr_data(str![[r#"
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `test` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [DOCTEST] foo
-",
-        )
+
+"#]])
         .run();
 }
 
@@ -763,24 +750,22 @@ edition = "2015"
 authors = []
 
 [lints.cargo]
-im-a-teapot = "warn"
             "#,
         )
         .file("src/lib.rs", "")
         .build();
 
     foo.cargo("check")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [WARNING] unused manifest key `lints.cargo` (may be supported in a future version)
 
 this Cargo does not support nightly features, but if you
 switch to nightly channel you can pass
 `-Zcargo-lints` to enable this feature.
-[CHECKING] foo v0.0.1 ([CWD])
-[FINISHED] [..]
-",
-        )
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 }
 
@@ -800,7 +785,6 @@ authors = []
 im-a-teapot = true
 
 [lints.cargo]
-im-a-teapot = "warn"
             "#,
         )
         .file("src/lib.rs", "")
@@ -808,15 +792,14 @@ im-a-teapot = "warn"
 
     foo.cargo("check")
         .masquerade_as_nightly_cargo(&["cargo-lints", "test-dummy-unstable"])
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [WARNING] unused manifest key `lints.cargo` (may be supported in a future version)
 
 consider passing `-Zcargo-lints` to enable this feature.
-[CHECKING] foo v0.0.1 ([CWD])
-[FINISHED] [..]
-",
-        )
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 }
 
@@ -836,149 +819,25 @@ authors = []
 im-a-teapot = true
 
 [lints.cargo]
-im-a-teapot = "warn"
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-
-    p.cargo("check -Zcargo-lints")
-        .masquerade_as_nightly_cargo(&["cargo-lints", "test-dummy-unstable"])
-        .with_stderr(
-            "\
-warning: `im_a_teapot` is specified
- --> Cargo.toml:9:1
-  |
-9 | im-a-teapot = true
-  | ------------------
-  |
-  = note: `cargo::im_a_teapot` is set to `warn` in `[lints]`
-[CHECKING] foo v0.0.1 ([CWD])
-[FINISHED] [..]
-",
-        )
-        .run();
-}
-
-#[cargo_test]
-fn cargo_lints_underscore_supported() {
-    let foo = project()
-        .file(
-            "Cargo.toml",
-            r#"
-cargo-features = ["test-dummy-unstable"]
-
-[package]
-name = "foo"
-version = "0.0.1"
-edition = "2015"
-authors = []
-im-a-teapot = true
-
-[lints.cargo]
 im_a_teapot = "warn"
             "#,
         )
         .file("src/lib.rs", "")
         .build();
 
-    foo.cargo("check -Zcargo-lints")
+    p.cargo("check -Zcargo-lints")
         .masquerade_as_nightly_cargo(&["cargo-lints", "test-dummy-unstable"])
-        .with_stderr(
-            "\
-warning: `im_a_teapot` is specified
+        .with_stderr_data(str![[r#"
+[WARNING] `im_a_teapot` is specified
  --> Cargo.toml:9:1
   |
 9 | im-a-teapot = true
   | ------------------
   |
-  = note: `cargo::im_a_teapot` is set to `warn` in `[lints]`
-[CHECKING] foo v0.0.1 ([CWD])
-[FINISHED] [..]
-",
-        )
-        .run();
-}
+  = [NOTE] `cargo::im_a_teapot` is set to `warn` in `[lints]`
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
-#[cargo_test]
-fn forbid_not_overridden() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-cargo-features = ["test-dummy-unstable"]
-
-[package]
-name = "foo"
-version = "0.0.1"
-edition = "2015"
-authors = []
-im-a-teapot = true
-
-[lints.cargo]
-im-a-teapot = { level = "warn", priority = 10 }
-test-dummy-unstable = { level = "forbid", priority = -1 }
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-
-    p.cargo("check -Zcargo-lints")
-        .masquerade_as_nightly_cargo(&["cargo-lints", "test-dummy-unstable"])
-        .with_status(101)
-        .with_stderr(
-            "\
-error: `im_a_teapot` is specified
- --> Cargo.toml:9:1
-  |
-9 | im-a-teapot = true
-  | ^^^^^^^^^^^^^^^^^^
-  |
-  = note: `cargo::im_a_teapot` is set to `forbid` in `[lints]`
-",
-        )
-        .run();
-}
-
-#[cargo_test]
-fn workspace_cargo_lints() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-cargo-features = ["test-dummy-unstable"]
-
-[workspace.lints.cargo]
-im-a-teapot = { level = "warn", priority = 10 }
-test-dummy-unstable = { level = "forbid", priority = -1 }
-
-[package]
-name = "foo"
-version = "0.0.1"
-edition = "2015"
-authors = []
-im-a-teapot = true
-
-[lints]
-workspace = true
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-
-    p.cargo("check -Zcargo-lints")
-        .masquerade_as_nightly_cargo(&["cargo-lints", "test-dummy-unstable"])
-        .with_status(101)
-        .with_stderr(
-            "\
-error: `im_a_teapot` is specified
-  --> Cargo.toml:13:1
-   |
-13 | im-a-teapot = true
-   | ^^^^^^^^^^^^^^^^^^
-   |
-   = note: `cargo::im_a_teapot` is set to `forbid` in `[lints]`
-",
-        )
+"#]])
         .run();
 }

@@ -2,6 +2,7 @@ use bstr::BString;
 use gix_transport::{client, Protocol};
 
 use crate::command::Feature;
+use crate::fetch::Response;
 
 /// The error returned in the [response module][crate::fetch::response].
 #[derive(Debug, thiserror::Error)]
@@ -59,15 +60,7 @@ pub enum Acknowledgement {
     Nak,
 }
 
-/// A shallow line received from the server.
-#[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone, Copy)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum ShallowUpdate {
-    /// Shallow the given `id`.
-    Shallow(gix_hash::ObjectId),
-    /// Don't shallow the given `id` anymore.
-    Unshallow(gix_hash::ObjectId),
-}
+pub use gix_shallow::Update as ShallowUpdate;
 
 /// A wanted-ref line received from the server.
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone)]
@@ -79,21 +72,19 @@ pub struct WantedRef {
     pub path: BString,
 }
 
-impl ShallowUpdate {
-    /// Parse a `ShallowUpdate` from a `line` as received to the server.
-    pub fn from_line(line: &str) -> Result<ShallowUpdate, Error> {
-        match line.trim_end().split_once(' ') {
-            Some((prefix, id)) => {
-                let id = gix_hash::ObjectId::from_hex(id.as_bytes())
-                    .map_err(|_| Error::UnknownLineType { line: line.to_owned() })?;
-                Ok(match prefix {
-                    "shallow" => ShallowUpdate::Shallow(id),
-                    "unshallow" => ShallowUpdate::Unshallow(id),
-                    _ => return Err(Error::UnknownLineType { line: line.to_owned() }),
-                })
-            }
-            None => Err(Error::UnknownLineType { line: line.to_owned() }),
+/// Parse a `ShallowUpdate` from a `line` as received to the server.
+pub fn shallow_update_from_line(line: &str) -> Result<ShallowUpdate, Error> {
+    match line.trim_end().split_once(' ') {
+        Some((prefix, id)) => {
+            let id = gix_hash::ObjectId::from_hex(id.as_bytes())
+                .map_err(|_| Error::UnknownLineType { line: line.to_owned() })?;
+            Ok(match prefix {
+                "shallow" => ShallowUpdate::Shallow(id),
+                "unshallow" => ShallowUpdate::Unshallow(id),
+                _ => return Err(Error::UnknownLineType { line: line.to_owned() }),
+            })
         }
+        None => Err(Error::UnknownLineType { line: line.to_owned() }),
     }
 }
 
@@ -148,15 +139,6 @@ impl WantedRef {
     }
 }
 
-/// A representation of a complete fetch response
-#[derive(Debug)]
-pub struct Response {
-    acks: Vec<Acknowledgement>,
-    shallows: Vec<ShallowUpdate>,
-    wanted_refs: Vec<WantedRef>,
-    has_pack: bool,
-}
-
 impl Response {
     /// Return true if the response has a pack which can be read next.
     pub fn has_pack(&self) -> bool {
@@ -203,6 +185,15 @@ impl Response {
         &self.shallows
     }
 
+    /// Append the given `updates` which may have been obtained from a
+    /// (handshake::Outcome)[crate::handshake::Outcome::v1_shallow_updates].
+    ///
+    /// In V2, these are received as part of the pack, but V1 sends them early, so we
+    /// offer to re-integrate them here.
+    pub fn append_v1_shallow_updates(&mut self, updates: Option<Vec<ShallowUpdate>>) {
+        self.shallows.extend(updates.into_iter().flatten());
+    }
+
     /// Return all wanted-refs [parsed previously][Response::from_line_reader()].
     pub fn wanted_refs(&self) -> &[WantedRef] {
         &self.wanted_refs
@@ -227,7 +218,7 @@ impl Response {
                 }
                 None => acks.push(ack),
             },
-            Err(_) => match ShallowUpdate::from_line(peeked_line) {
+            Err(_) => match shallow_update_from_line(peeked_line) {
                 Ok(shallow) => {
                     shallows.push(shallow);
                 }

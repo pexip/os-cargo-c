@@ -9,6 +9,7 @@ use std::path::Path;
 
 use crate::entry::{EntryFields, EntryIo};
 use crate::error::TarError;
+use crate::header::BLOCK_SIZE;
 use crate::other;
 use crate::pax::*;
 use crate::{Entry, GnuExtSparseHeader, GnuSparseHeader, Header};
@@ -238,6 +239,15 @@ impl Archive<dyn Read + '_> {
                 file.unpack_in(dst)?;
             }
         }
+
+        // Apply the directories.
+        //
+        // Note: the order of application is important to permissions. That is, we must traverse
+        // the filesystem graph in topological ordering or else we risk not being able to create
+        // child directories within those of more restrictive permissions. See [0] for details.
+        //
+        // [0]: <https://github.com/alexcrichton/tar-rs/issues/242>
+        directories.sort_by(|a, b| b.path_bytes().cmp(&a.path_bytes()));
         for mut dir in directories {
             dir.unpack_in(dst)?;
         }
@@ -249,7 +259,7 @@ impl Archive<dyn Read + '_> {
 impl<'a, R: Read> Entries<'a, R> {
     /// Indicates whether this iterator will return raw entries or not.
     ///
-    /// If the raw list of entries are returned, then no preprocessing happens
+    /// If the raw list of entries is returned, then no preprocessing happens
     /// on account of this library, for example taking into account GNU long name
     /// or long link archive members. Raw iteration is disabled by default.
     pub fn raw(self, raw: bool) -> Entries<'a, R> {
@@ -293,14 +303,14 @@ impl<'a> EntriesFields<'a> {
             // Otherwise, check if we are ignoring zeros and continue, or break as if this is the
             // end of the archive.
             if !header.as_bytes().iter().all(|i| *i == 0) {
-                self.next += 512;
+                self.next += BLOCK_SIZE;
                 break;
             }
 
             if !self.archive.inner.ignore_zeros {
                 return Ok(None);
             }
-            self.next += 512;
+            self.next += BLOCK_SIZE;
             header_pos = self.next;
         }
 
@@ -355,11 +365,11 @@ impl<'a> EntriesFields<'a> {
         // Store where the next entry is, rounding up by 512 bytes (the size of
         // a header);
         let size = size
-            .checked_add(511)
+            .checked_add(BLOCK_SIZE - 1)
             .ok_or_else(|| other("size overflow"))?;
         self.next = self
             .next
-            .checked_add(size & !(512 - 1))
+            .checked_add(size & !(BLOCK_SIZE - 1))
             .ok_or_else(|| other("size overflow"))?;
 
         Ok(Some(ret.into_entry()))
@@ -474,7 +484,7 @@ impl<'a> EntriesFields<'a> {
                 }
                 let off = block.offset()?;
                 let len = block.length()?;
-                if len != 0 && (size - remaining) % 512 != 0 {
+                if len != 0 && (size - remaining) % BLOCK_SIZE != 0 {
                     return Err(other(
                         "previous block in sparse file was not \
                          aligned to 512-byte boundary",
@@ -511,7 +521,7 @@ impl<'a> EntriesFields<'a> {
                         return Err(other("failed to read extension"));
                     }
 
-                    self.next += 512;
+                    self.next += BLOCK_SIZE;
                     for block in ext.sparse.iter() {
                         add_block(block)?;
                     }

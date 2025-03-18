@@ -52,7 +52,7 @@ impl<T> Writer<T> {
     /// If called, each call to [`write()`][io::Write::write()] will write the input as text, appending a trailing newline
     /// if needed before writing.
     pub fn enable_text_mode(&mut self) {
-        self.inner.suffix = &[b'\n'];
+        self.inner.suffix = b"\n";
     }
 }
 
@@ -68,7 +68,7 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for Writer<T> {
                             "empty packet lines are not permitted as '0004' is invalid",
                         )));
                     }
-                    *this.state = State::WriteData(0)
+                    *this.state = State::WriteData(0);
                 }
                 State::WriteData(written) => {
                     while *written != buf.len() {

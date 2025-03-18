@@ -121,13 +121,12 @@ mrb_value response_mod_header(mrb_state *mrb, mrb_value self, bool repl) {
 
   key = mrb_funcall(mrb, key, "downcase", 0);
 
-  auto keyref =
-      make_string_ref(balloc, StringRef{RSTRING_PTR(key),
-                                        static_cast<size_t>(RSTRING_LEN(key))});
+  auto keyref = make_string_ref(
+    balloc, StringRef{RSTRING_PTR(key), static_cast<size_t>(RSTRING_LEN(key))});
 
   mrb_gc_arena_restore(mrb, ai);
 
-  auto token = http2::lookup_token(keyref.byte(), keyref.size());
+  auto token = http2::lookup_token(keyref);
 
   if (repl) {
     size_t p = 0;
@@ -154,19 +153,19 @@ mrb_value response_mod_header(mrb_state *mrb, mrb_value self, bool repl) {
       }
 
       resp.fs.add_header_token(
-          keyref,
-          make_string_ref(balloc,
-                          StringRef{RSTRING_PTR(value),
-                                    static_cast<size_t>(RSTRING_LEN(value))}),
-          false, token);
+        keyref,
+        make_string_ref(balloc,
+                        StringRef{RSTRING_PTR(value),
+                                  static_cast<size_t>(RSTRING_LEN(value))}),
+        false, token);
     }
   } else if (mrb_string_p(values)) {
     resp.fs.add_header_token(
-        keyref,
-        make_string_ref(balloc,
-                        StringRef{RSTRING_PTR(values),
-                                  static_cast<size_t>(RSTRING_LEN(values))}),
-        false, token);
+      keyref,
+      make_string_ref(balloc,
+                      StringRef{RSTRING_PTR(values),
+                                static_cast<size_t>(RSTRING_LEN(values))}),
+      false, token);
   } else {
     mrb_raise(mrb, E_RUNTIME_ERROR, "value must be string");
   }
@@ -245,8 +244,8 @@ mrb_value response_return(mrb_state *mrb, mrb_value self) {
     if (cl) {
       cl->value = content_length;
     } else {
-      resp.fs.add_header_token(StringRef::from_lit("content-length"),
-                               content_length, false, http2::HD_CONTENT_LENGTH);
+      resp.fs.add_header_token("content-length"_sr, content_length, false,
+                               http2::HD_CONTENT_LENGTH);
     }
 
     resp.fs.content_length = vallen;
@@ -256,7 +255,7 @@ mrb_value response_return(mrb_state *mrb, mrb_value self) {
   if (!date) {
     auto lgconf = log_config();
     lgconf->update_tstamp(std::chrono::system_clock::now());
-    resp.fs.add_header_token(StringRef::from_lit("date"),
+    resp.fs.add_header_token("date"_sr,
                              make_string_ref(balloc, lgconf->tstamp->time_http),
                              false, http2::HD_DATE);
   }
@@ -313,13 +312,13 @@ mrb_value response_send_info(mrb_state *mrb, mrb_value self) {
 
     key = mrb_funcall(mrb, key, "downcase", 0);
 
-    auto keyref = make_string_ref(
-        balloc,
-        StringRef{RSTRING_PTR(key), static_cast<size_t>(RSTRING_LEN(key))});
+    auto keyref =
+      make_string_ref(balloc, StringRef{RSTRING_PTR(key),
+                                        static_cast<size_t>(RSTRING_LEN(key))});
 
     mrb_gc_arena_restore(mrb, ai);
 
-    auto token = http2::lookup_token(keyref.byte(), keyref.size());
+    auto token = http2::lookup_token(keyref);
 
     if (mrb_array_p(values)) {
       auto n = RARRAY_LEN(values);
@@ -330,19 +329,19 @@ mrb_value response_send_info(mrb_state *mrb, mrb_value self) {
         }
 
         resp.fs.add_header_token(
-            keyref,
-            make_string_ref(balloc,
-                            StringRef{RSTRING_PTR(value),
-                                      static_cast<size_t>(RSTRING_LEN(value))}),
-            false, token);
+          keyref,
+          make_string_ref(balloc,
+                          StringRef{RSTRING_PTR(value),
+                                    static_cast<size_t>(RSTRING_LEN(value))}),
+          false, token);
       }
     } else if (mrb_string_p(values)) {
       resp.fs.add_header_token(
-          keyref,
-          make_string_ref(balloc,
-                          StringRef{RSTRING_PTR(values),
-                                    static_cast<size_t>(RSTRING_LEN(values))}),
-          false, token);
+        keyref,
+        make_string_ref(balloc,
+                        StringRef{RSTRING_PTR(values),
+                                  static_cast<size_t>(RSTRING_LEN(values))}),
+        false, token);
     } else {
       mrb_raise(mrb, E_RUNTIME_ERROR, "value must be string");
     }
@@ -367,7 +366,7 @@ mrb_value response_send_info(mrb_state *mrb, mrb_value self) {
 
 void init_response_class(mrb_state *mrb, RClass *module) {
   auto response_class =
-      mrb_define_class_under(mrb, module, "Response", mrb->object_class);
+    mrb_define_class_under(mrb, module, "Response", mrb->object_class);
 
   mrb_define_method(mrb, response_class, "initialize", response_init,
                     MRB_ARGS_NONE());

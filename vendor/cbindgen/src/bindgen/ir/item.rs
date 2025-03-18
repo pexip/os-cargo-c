@@ -9,8 +9,8 @@ use crate::bindgen::config::Config;
 use crate::bindgen::declarationtyperesolver::DeclarationTypeResolver;
 use crate::bindgen::dependencies::Dependencies;
 use crate::bindgen::ir::{
-    AnnotationSet, Cfg, Constant, Enum, GenericArgument, OpaqueItem, Path, Static, Struct, Typedef,
-    Union,
+    AnnotationSet, Cfg, Constant, Documentation, Enum, GenericArgument, GenericParams, OpaqueItem,
+    Path, Static, Struct, Typedef, Union,
 };
 use crate::bindgen::library::Library;
 use crate::bindgen::monomorph::Monomorphs;
@@ -27,6 +27,7 @@ pub trait Item {
     fn cfg(&self) -> Option<&Cfg>;
     fn annotations(&self) -> &AnnotationSet;
     fn annotations_mut(&mut self) -> &mut AnnotationSet;
+    fn documentation(&self) -> &Documentation;
 
     fn container(&self) -> ItemContainer;
 
@@ -36,6 +37,12 @@ pub trait Item {
     fn resolve_declaration_types(&mut self, _resolver: &DeclarationTypeResolver) {
         unimplemented!()
     }
+    fn generic_params(&self) -> &GenericParams;
+
+    fn is_generic(&self) -> bool {
+        !self.generic_params().is_empty()
+    }
+
     fn rename_for_config(&mut self, _config: &Config) {}
     fn add_dependencies(&self, _library: &Library, _out: &mut Dependencies) {}
     fn instantiate_monomorph(
@@ -158,28 +165,13 @@ impl<T: Item + Clone> ItemMap<T> {
     where
         F: Fn(&T) -> bool,
     {
-        let data = mem::take(&mut self.data);
-
-        for (name, container) in data {
-            match container {
-                ItemValue::Cfg(items) => {
-                    let mut new_items = Vec::new();
-                    for item in items {
-                        if !callback(&item) {
-                            new_items.push(item);
-                        }
-                    }
-                    if !new_items.is_empty() {
-                        self.data.insert(name, ItemValue::Cfg(new_items));
-                    }
-                }
-                ItemValue::Single(item) => {
-                    if !callback(&item) {
-                        self.data.insert(name, ItemValue::Single(item));
-                    }
-                }
+        self.data.retain(|_, container| match *container {
+            ItemValue::Cfg(ref mut items) => {
+                items.retain(|item| !callback(item));
+                !items.is_empty()
             }
-        }
+            ItemValue::Single(ref item) => !callback(item),
+        });
     }
 
     pub fn for_all_items<F>(&self, mut callback: F)

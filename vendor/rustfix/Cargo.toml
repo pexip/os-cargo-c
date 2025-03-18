@@ -11,17 +11,23 @@
 
 [package]
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.79"
 name = "rustfix"
-version = "0.8.4"
+version = "0.9.0"
 authors = [
     "Pascal Hertleif <killercup@gmail.com>",
     "Oliver Schneider <oli-obk@users.noreply.github.com>",
 ]
+build = false
 exclude = [
     "examples/*",
     "tests/*",
 ]
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Automatically apply the suggestions made by rustc"
 homepage = "https://github.com/rust-lang/cargo"
 documentation = "https://docs.rs/rustfix"
@@ -29,27 +35,33 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rust-lang/cargo"
 
+[lib]
+name = "rustfix"
+path = "src/lib.rs"
+
 [dependencies.serde]
-version = "1.0.197"
+version = "1.0.204"
 features = ["derive"]
 
 [dependencies.serde_json]
-version = "1.0.115"
+version = "1.0.120"
 
 [dependencies.thiserror]
-version = "1.0.58"
+version = "1.0.63"
 
 [dependencies.tracing]
 version = "0.1.40"
+features = ["std"]
+default-features = false
 
 [dev-dependencies.anyhow]
-version = "1.0.81"
+version = "1.0.86"
 
 [dev-dependencies.proptest]
-version = "1.4.0"
+version = "1.5.0"
 
 [dev-dependencies.similar]
-version = "2.5.0"
+version = "2.6.0"
 
 [dev-dependencies.tempfile]
 version = "3.10.1"
@@ -67,6 +79,10 @@ self_named_module_files = "warn"
 
 [lints.clippy.all]
 level = "allow"
+priority = -2
+
+[lints.clippy.correctness]
+level = "warn"
 priority = -1
 
 [lints.rust]

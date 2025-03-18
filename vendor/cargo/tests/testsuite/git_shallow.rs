@@ -1,6 +1,8 @@
-use crate::git_gc::find_index;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::{basic_manifest, git, paths, project};
+
+use crate::git_gc::find_index;
 
 enum RepoMode {
     Shallow,
@@ -443,7 +445,7 @@ fn gitoxide_shallow_clone_followed_by_non_shallow_update() -> anyhow::Result<()>
 
     assert_eq!(
         max_history_depth, 3,
-        "we see the previous shallow checkout as well as new new unshallow one"
+        "we see the previous shallow checkout as well as new unshallow one"
     );
 
     Ok(())

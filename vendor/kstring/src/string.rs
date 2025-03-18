@@ -118,14 +118,14 @@ impl<B: crate::backend::HeapStr> std::ops::Deref for KStringBase<B> {
 
 impl<B: crate::backend::HeapStr> Eq for KStringBase<B> {}
 
-impl<'s, B: crate::backend::HeapStr> PartialEq<KStringBase<B>> for KStringBase<B> {
+impl<B: crate::backend::HeapStr> PartialEq<KStringBase<B>> for KStringBase<B> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         PartialEq::eq(self.as_str(), other.as_str())
     }
 }
 
-impl<'s, B: crate::backend::HeapStr> PartialEq<str> for KStringBase<B> {
+impl<B: crate::backend::HeapStr> PartialEq<str> for KStringBase<B> {
     #[inline]
     fn eq(&self, other: &str) -> bool {
         PartialEq::eq(self.as_str(), other)
@@ -139,7 +139,7 @@ impl<'s, B: crate::backend::HeapStr> PartialEq<&'s str> for KStringBase<B> {
     }
 }
 
-impl<'s, B: crate::backend::HeapStr> PartialEq<String> for KStringBase<B> {
+impl<B: crate::backend::HeapStr> PartialEq<String> for KStringBase<B> {
     #[inline]
     fn eq(&self, other: &StdString) -> bool {
         PartialEq::eq(self.as_str(), other.as_str())
@@ -156,7 +156,7 @@ impl<B: crate::backend::HeapStr> Ord for KStringBase<B> {
 impl<B: crate::backend::HeapStr> PartialOrd for KStringBase<B> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.as_str().partial_cmp(other.as_str())
+        Some(self.cmp(other))
     }
 }
 
@@ -198,7 +198,7 @@ impl<B: crate::backend::HeapStr> AsRef<[u8]> for KStringBase<B> {
 impl<B: crate::backend::HeapStr> AsRef<std::ffi::OsStr> for KStringBase<B> {
     #[inline]
     fn as_ref(&self) -> &std::ffi::OsStr {
-        (&**self).as_ref()
+        (**self).as_ref()
     }
 }
 
@@ -501,6 +501,7 @@ mod inner {
 mod inner {
     use super::*;
 
+    #[repr(C)]
     pub(super) union KStringInner<B> {
         tag: TagVariant,
         singleton: SingletonVariant,

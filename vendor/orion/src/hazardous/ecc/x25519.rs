@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2021-2023 The orion Developers
+// Copyright (c) 2021-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -500,12 +500,13 @@ impl PublicKey {
 ///
 /// # Security:
 /// - __**Avoid using**__ `unprotected_as_bytes()` whenever possible, as it breaks all protections
-/// that the type implements.
+///   that the type implements.
 ///
 /// - The trait `PartialEq<&'_ [u8]>` is implemented for this type so that users are not tempted
-/// to call `unprotected_as_bytes` to compare this sensitive value to a byte slice. The trait
-/// is implemented in such a way that the comparison happens in constant time. Thus, users should
-/// prefer `SecretType == &[u8]` over `SecretType.unprotected_as_bytes() == &[u8]`.
+///   to call `unprotected_as_bytes` to compare this sensitive value to a byte slice. The trait
+///   is implemented in such a way that the comparison happens in constant time. Thus, users should
+///   prefer `SecretType == &[u8]` over `SecretType.unprotected_as_bytes() == &[u8]`.
+///
 /// Examples are shown below. The examples apply to any type that implements `PartialEq<&'_ [u8]>`.
 /// ```rust
 /// # #[cfg(feature = "safe_api")] {
@@ -584,6 +585,7 @@ impl PrivateKey {
     }
 
     #[cfg(feature = "safe_api")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "safe_api")))]
     /// Randomly generate using a CSPRNG. Not available in `no_std` context.
     pub fn generate() -> PrivateKey {
         let mut value = [0u8; PRIVATE_KEY_SIZE];

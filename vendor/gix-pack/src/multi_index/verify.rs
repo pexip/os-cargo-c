@@ -2,10 +2,9 @@ use std::{cmp::Ordering, sync::atomic::AtomicBool, time::Instant};
 
 use gix_features::progress::{Count, DynNestedProgress, Progress};
 
-use crate::{index, multi_index::File};
+use crate::{exact_vec, index, multi_index::File};
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod integrity {
     use crate::multi_index::EntryIndex;
 
@@ -69,7 +68,6 @@ pub mod integrity {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod checksum {
     /// Returned by [`multi_index::File::verify_checksum()`][crate::multi_index::File::verify_checksum()].
     pub type Error = crate::verify::checksum::Error;
@@ -168,7 +166,7 @@ impl File {
 
         let operation_start = Instant::now();
         let mut total_objects_checked = 0;
-        let mut pack_ids_and_offsets = Vec::with_capacity(self.num_objects as usize);
+        let mut pack_ids_and_offsets = exact_vec(self.num_objects as usize);
         {
             let order_start = Instant::now();
             let mut progress = progress.add_child_with_id("checking oid order".into(), gix_features::progress::UNKNOWN);

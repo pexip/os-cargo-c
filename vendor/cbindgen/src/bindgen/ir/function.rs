@@ -3,24 +3,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use std::collections::HashMap;
-use std::io::Write;
 
 use syn::ext::IdentExt;
 
-use crate::bindgen::cdecl;
-use crate::bindgen::config::{Config, Language, Layout};
+use crate::bindgen::config::{Config, Language};
 use crate::bindgen::declarationtyperesolver::DeclarationTypeResolver;
 use crate::bindgen::dependencies::Dependencies;
-use crate::bindgen::ir::{
-    AnnotationSet, Cfg, ConditionWrite, DeprecatedNoteKind, Documentation, GenericPath, Path,
-    ToCondition, Type,
-};
+use crate::bindgen::ir::{AnnotationSet, Cfg, Documentation, GenericPath, Path, Type};
 use crate::bindgen::library::Library;
 use crate::bindgen::monomorph::Monomorphs;
 use crate::bindgen::rename::{IdentifierType, RenameRule};
 use crate::bindgen::reserved;
 use crate::bindgen::utilities::IterHelpers;
-use crate::bindgen::writer::{Source, SourceWriter};
 
 #[derive(Debug, Clone)]
 pub struct FunctionArgument {
@@ -54,6 +48,13 @@ impl Function {
         mod_cfg: Option<&Cfg>,
     ) -> Result<Function, String> {
         let mut args = sig.inputs.iter().try_skip_map(|x| x.as_argument())?;
+        if sig.variadic.is_some() {
+            args.push(FunctionArgument {
+                name: None,
+                ty: Type::Primitive(super::PrimitiveType::VaList),
+                array_length: None,
+            })
+        }
 
         let (mut ret, never_return) = Type::load_from_output(&sig.output)?;
 
@@ -155,10 +156,8 @@ impl Function {
         self.ret.rename_for_config(config, &generic_params);
 
         // Apply rename rules to argument names
-        let rules = self
-            .annotations
-            .parse_atom::<RenameRule>("rename-all")
-            .unwrap_or(config.function.rename_args);
+        let rules = self.annotations.parse_atom::<RenameRule>("rename-all");
+        let rules = rules.as_ref().unwrap_or(&config.function.rename_args);
 
         if let Some(r) = rules.not_none() {
             let args = std::mem::take(&mut self.args);
@@ -220,133 +219,29 @@ impl Function {
     }
 }
 
-impl Source for Function {
-    fn write<F: Write>(&self, config: &Config, out: &mut SourceWriter<F>) {
-        fn write_1<W: Write>(func: &Function, config: &Config, out: &mut SourceWriter<W>) {
-            let prefix = config.function.prefix(&func.annotations);
-            let postfix = config.function.postfix(&func.annotations);
-
-            let condition = func.cfg.to_condition(config);
-            condition.write_before(config, out);
-
-            func.documentation.write(config, out);
-
-            if func.extern_decl {
-                out.write("extern ");
-            } else {
-                if let Some(ref prefix) = prefix {
-                    write!(out, "{} ", prefix);
-                }
-                if func.annotations.must_use(config) {
-                    if let Some(ref anno) = config.function.must_use {
-                        write!(out, "{} ", anno);
-                    }
-                }
-                if let Some(note) = func
-                    .annotations
-                    .deprecated_note(config, DeprecatedNoteKind::Function)
-                {
-                    write!(out, "{} ", note);
-                }
-            }
-            cdecl::write_func(out, func, Layout::Horizontal, config);
-
-            if !func.extern_decl {
-                if let Some(ref postfix) = postfix {
-                    write!(out, " {}", postfix);
-                }
-            }
-
-            if let Some(ref swift_name_macro) = config.function.swift_name_macro {
-                if let Some(swift_name) = func.swift_name(config) {
-                    write!(out, " {}({})", swift_name_macro, swift_name);
-                }
-            }
-
-            out.write(";");
-
-            condition.write_after(config, out);
-        }
-
-        fn write_2<W: Write>(func: &Function, config: &Config, out: &mut SourceWriter<W>) {
-            let prefix = config.function.prefix(&func.annotations);
-            let postfix = config.function.postfix(&func.annotations);
-
-            let condition = func.cfg.to_condition(config);
-
-            condition.write_before(config, out);
-
-            func.documentation.write(config, out);
-
-            if func.extern_decl {
-                out.write("extern ");
-            } else {
-                if let Some(ref prefix) = prefix {
-                    write!(out, "{}", prefix);
-                    out.new_line();
-                }
-                if func.annotations.must_use(config) {
-                    if let Some(ref anno) = config.function.must_use {
-                        write!(out, "{}", anno);
-                        out.new_line();
-                    }
-                }
-                if let Some(note) = func
-                    .annotations
-                    .deprecated_note(config, DeprecatedNoteKind::Function)
-                {
-                    write!(out, "{}", note);
-                    out.new_line();
-                }
-            }
-            cdecl::write_func(out, func, Layout::Vertical, config);
-            if !func.extern_decl {
-                if let Some(ref postfix) = postfix {
-                    out.new_line();
-                    write!(out, "{}", postfix);
-                }
-            }
-
-            if let Some(ref swift_name_macro) = config.function.swift_name_macro {
-                if let Some(swift_name) = func.swift_name(config) {
-                    write!(out, " {}({})", swift_name_macro, swift_name);
-                }
-            }
-
-            out.write(";");
-
-            condition.write_after(config, out);
-        }
-
-        match config.function.args {
-            Layout::Horizontal => write_1(self, config, out),
-            Layout::Vertical => write_2(self, config, out),
-            Layout::Auto => {
-                if !out.try_write(|out| write_1(self, config, out), config.line_length) {
-                    write_2(self, config, out)
-                }
-            }
-        }
-    }
-}
-
 trait SynFnArgHelpers {
     fn as_argument(&self) -> Result<Option<FunctionArgument>, String>;
 }
 
-fn gen_self_type(receiver: &syn::Receiver) -> Type {
-    let self_ty = Type::Path(GenericPath::self_path());
+fn gen_self_type(receiver: &syn::Receiver) -> Result<Type, String> {
+    let mut self_ty = Type::Path(GenericPath::self_path());
+
+    // Custom self type
+    if receiver.colon_token.is_some() {
+        self_ty = Type::load(receiver.ty.as_ref())?.unwrap_or(self_ty);
+    }
+
     if receiver.reference.is_none() {
-        return self_ty;
+        return Ok(self_ty);
     }
 
     let is_const = receiver.mutability.is_none();
-    Type::Ptr {
+    Ok(Type::Ptr {
         ty: Box::new(self_ty),
         is_const,
         is_nullable: false,
         is_ref: false,
-    }
+    })
 }
 
 impl SynFnArgHelpers for syn::FnArg {
@@ -355,10 +250,18 @@ impl SynFnArgHelpers for syn::FnArg {
             syn::FnArg::Typed(syn::PatType {
                 ref pat, ref ty, ..
             }) => {
+                let ty = match Type::load(ty)? {
+                    Some(x) => x,
+                    None => return Ok(None),
+                };
                 let name = match **pat {
                     syn::Pat::Wild(..) => None,
                     syn::Pat::Ident(syn::PatIdent { ref ident, .. }) => {
-                        Some(ident.unraw().to_string())
+                        if ty == Type::Primitive(super::PrimitiveType::VaList) {
+                            None
+                        } else {
+                            Some(ident.unraw().to_string())
+                        }
                     }
                     _ => {
                         return Err(format!(
@@ -366,10 +269,6 @@ impl SynFnArgHelpers for syn::FnArg {
                             pat
                         ))
                     }
-                };
-                let ty = match Type::load(ty)? {
-                    Some(x) => x,
-                    None => return Ok(None),
                 };
                 if let Type::Array(..) = ty {
                     return Err("Array as function arguments are not supported".to_owned());
@@ -382,7 +281,7 @@ impl SynFnArgHelpers for syn::FnArg {
             }
             syn::FnArg::Receiver(ref receiver) => Ok(Some(FunctionArgument {
                 name: Some("self".to_string()),
-                ty: gen_self_type(receiver),
+                ty: gen_self_type(receiver)?,
                 array_length: None,
             })),
         }

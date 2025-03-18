@@ -88,7 +88,7 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl<'spec, 'item> Outcome<'spec, 'item> {
+impl Outcome<'_, '_> {
     /// Validate all mappings or dissolve them into an error stating the discovered issues.
     /// Return `(modified self, issues)` providing a fixed-up set of mappings in `self` with the fixed `issues`
     /// provided as part of it.
@@ -102,7 +102,7 @@ impl<'spec, 'item> Outcome<'spec, 'item> {
         {
             let sources = sources_by_destinations.entry(dst).or_insert_with(Vec::new);
             if !sources.iter().any(|(_, lhs)| lhs == &src) {
-                sources.push((spec_index, src))
+                sources.push((spec_index, src));
             }
         }
         let mut issues = Vec::new();
@@ -114,7 +114,7 @@ impl<'spec, 'item> Outcome<'spec, 'item> {
                     .map(|(spec_idx, _)| self.group.specs[*spec_idx].to_bstring())
                     .collect(),
                 sources: conflicting_sources.into_iter().map(|(_, src)| src.to_owned()).collect(),
-            })
+            });
         }
         if !issues.is_empty() {
             Err(Error { issues })

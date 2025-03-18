@@ -117,11 +117,11 @@ void stop_ev(struct ev_loop *loop,
 } // namespace
 
 DNSResolver::DNSResolver(struct ev_loop *loop)
-    : result_{},
-      loop_(loop),
-      channel_(nullptr),
-      family_(AF_UNSPEC),
-      status_(DNSResolverStatus::IDLE) {
+  : result_{},
+    loop_(loop),
+    channel_(nullptr),
+    family_(AF_UNSPEC),
+    status_(DNSResolverStatus::IDLE) {
   ev_timer_init(&timer_, timeoutcb, 0., 0.);
   timer_.data = this;
 }
@@ -178,7 +178,7 @@ int DNSResolver::resolve(const StringRef &name, int family) {
   ares_addrinfo_hints hints{};
   hints.ai_family = family_;
 
-  ares_getaddrinfo(channel_, name_.c_str(), nullptr, &hints, addrinfo_cb, this);
+  ares_getaddrinfo(channel_, name_.data(), nullptr, &hints, addrinfo_cb, this);
   reset_timeout();
 
   return 0;

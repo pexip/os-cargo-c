@@ -6,23 +6,29 @@
 //! what happens when time passes. The [`days_ago_unix`] and
 //! [`months_ago_unix`] functions help with setting this value.
 
-use super::config::GlobalContextBuilder;
-use cargo::core::global_cache_tracker::{self, DeferredGlobalLastUse, GlobalCacheTracker};
-use cargo::util::cache_lock::CacheLockMode;
-use cargo::util::interning::InternedString;
-use cargo::GlobalContext;
-use cargo_test_support::paths::{self, CargoPathExt};
-use cargo_test_support::registry::{Package, RegistryBuilder};
-use cargo_test_support::{
-    basic_manifest, cargo_process, execs, git, process, project, retry, sleep_ms,
-    thread_wait_timeout, Execs, Project,
-};
-use itertools::Itertools;
+use std::env;
 use std::fmt::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
+
+use cargo::core::global_cache_tracker::{self, DeferredGlobalLastUse, GlobalCacheTracker};
+use cargo::util::cache_lock::CacheLockMode;
+use cargo::util::interning::InternedString;
+use cargo::GlobalContext;
+use cargo_test_support::compare::assert_e2e;
+use cargo_test_support::paths;
+use cargo_test_support::prelude::*;
+use cargo_test_support::registry::{Package, RegistryBuilder};
+use cargo_test_support::{
+    basic_manifest, cargo_process, execs, git, process, project, retry, sleep_ms, str,
+    thread_wait_timeout, Execs, Project,
+};
+use itertools::Itertools;
+
+use super::config::GlobalContextBuilder;
 
 /// Helper to create a simple `foo` project which depends on a registry
 /// dependency called `bar`.
@@ -72,11 +78,22 @@ fn get_git_checkout_names(db_name: &str) -> Vec<String> {
 }
 
 fn days_ago(n: u64) -> SystemTime {
-    SystemTime::now() - Duration::from_secs(60 * 60 * 24 * n)
+    now() - Duration::from_secs(60 * 60 * 24 * n)
+}
+
+fn now() -> SystemTime {
+    // This captures the time once to avoid potential time boundaries or
+    // inconsistencies affecting a test. For example, on a fast system
+    // `days_ago(1)` called twice in a row will return the same answer.
+    // However, on a slower system, or if the clock happens to flip over from
+    // one second to the next, then it would return different answers. This
+    // ensures that it always returns the same answer.
+    static START: OnceLock<SystemTime> = OnceLock::new();
+    *START.get_or_init(|| SystemTime::now())
 }
 
 /// Helper for simulating running cargo in the past. Use with the
-/// __CARGO_TEST_LAST_USE_NOW environment variable.
+/// `__CARGO_TEST_LAST_USE_NOW` environment variable.
 fn days_ago_unix(n: u64) -> String {
     days_ago(n)
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -86,7 +103,7 @@ fn days_ago_unix(n: u64) -> String {
 }
 
 /// Helper for simulating running cargo in the past. Use with the
-/// __CARGO_TEST_LAST_USE_NOW environment variable.
+/// `__CARGO_TEST_LAST_USE_NOW` environment variable.
 fn months_ago_unix(n: u64) -> String {
     days_ago_unix(n * 30)
 }
@@ -155,12 +172,19 @@ fn populate_cache(
     (cache_dir, src_dir)
 }
 
+/// Returns an `Execs` that will run the rustup `cargo` proxy from the global
+/// system's cargo home directory.
 fn rustup_cargo() -> Execs {
-    // Get the path to the rustup cargo wrapper. This is necessary because
-    // cargo adds the "deps" directory into PATH on Windows, which points to
-    // the wrong cargo.
-    let rustup_cargo = Path::new(&std::env::var_os("CARGO_HOME").unwrap()).join("bin/cargo");
-    execs().with_process_builder(process(rustup_cargo))
+    // Modify the PATH to ensure that `cargo` and `rustc` comes from
+    // CARGO_HOME. This is necessary because cargo adds the "deps" directory
+    // into PATH on Windows, which points to the wrong cargo.
+    let real_cargo_home_bin = Path::new(&std::env::var_os("CARGO_HOME").unwrap()).join("bin");
+    let mut paths = vec![real_cargo_home_bin];
+    paths.extend(env::split_paths(&env::var_os("PATH").unwrap_or_default()));
+    let path = env::join_paths(paths).unwrap();
+    let mut e = execs().with_process_builder(process("cargo"));
+    e.env("PATH", path);
+    e
 }
 
 #[cargo_test]
@@ -186,13 +210,12 @@ fn auto_gc_gated() {
 fn clean_gc_gated() {
     cargo_process("clean gc")
         .with_status(101)
-        .with_stderr(
-            "\
-error: the `cargo clean gc` command is unstable, and only available on the \
-nightly channel of Cargo, but this is the `stable` channel
-See [..]
-See [..]
-",
+        .with_stderr_data(str![[r#"
+[ERROR] the `cargo clean gc` command is unstable, and only available on the nightly channel of Cargo, but this is the `stable` channel
+See https://doc.rust-lang.org/book/appendix-07-nightly-rust.html for more information about Rust release channels.
+See https://github.com/rust-lang/cargo/issues/12633 for more information about the `cargo clean gc` command.
+
+"#]]
         )
         .run();
 }
@@ -417,7 +440,7 @@ fn frequency() {
         .env("CARGO_GC_AUTO_FREQUENCY", "1 day")
         .masquerade_as_nightly_cargo(&["gc"])
         .run();
-    assert_eq!(get_index_names().len(), 1);
+    assert_eq!(get_index_names().len(), 0);
     assert_eq!(get_registry_names("src").len(), 0);
     assert_eq!(get_registry_names("cache").len(), 0);
 }
@@ -591,7 +614,7 @@ fn auto_gc_various_commands() {
             .acquire_package_cache_lock(CacheLockMode::MutateExclusive)
             .unwrap();
         let indexes = tracker.registry_index_all().unwrap();
-        assert_eq!(indexes.len(), 1);
+        assert_eq!(indexes.len(), 0);
         let crates = tracker.registry_crate_all().unwrap();
         assert_eq!(crates.len(), 0);
         let srcs = tracker.registry_src_all().unwrap();
@@ -749,30 +772,35 @@ fn clean_gc_dry_run() {
     let index = glob_registry("index").ls_r();
     let src = glob_registry("src").ls_r();
     let cache = glob_registry("cache").ls_r();
-    let expected_files = index
+    let mut expected_files = index
         .iter()
         .chain(src.iter())
         .chain(cache.iter())
         .map(|p| p.to_str().unwrap())
         .join("\n");
+    expected_files.push_str("\n");
+    let expected_files = snapbox::filter::normalize_paths(&expected_files);
+    let expected_files = assert_e2e().redactions().redact(&expected_files);
 
     p.cargo("clean gc --dry-run -v -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stdout_unordered(&expected_files)
-        .with_stderr(
-            "[SUMMARY] [..] files, [..] total\n\
-            [WARNING] no files deleted due to --dry-run",
-        )
+        .with_stdout_data(expected_files.as_str().unordered())
+        .with_stderr_data(str![[r#"
+[SUMMARY] [FILE_NUM] files, [FILE_SIZE]B total
+[WARNING] no files deleted due to --dry-run
+
+"#]])
         .run();
 
     // Again, make sure the information is still tracked.
     p.cargo("clean gc --dry-run -v -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stdout_unordered(&expected_files)
-        .with_stderr(
-            "[SUMMARY] [..] files, [..] total\n\
-            [WARNING] no files deleted due to --dry-run",
-        )
+        .with_stdout_data(expected_files.as_str().unordered())
+        .with_stderr_data(str![[r#"
+[SUMMARY] [FILE_NUM] files, [FILE_SIZE]B total
+[WARNING] no files deleted due to --dry-run
+
+"#]])
         .run();
 }
 
@@ -787,13 +815,15 @@ fn clean_default_gc() {
         .run();
     p.cargo("clean gc -v -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr_unordered(
-            "\
-[REMOVING] [ROOT]/home/.cargo/registry/index/[..]
-[REMOVING] [ROOT]/home/.cargo/registry/src/[..]
-[REMOVING] [ROOT]/home/.cargo/registry/cache/[..]
-[REMOVED] [..] files, [..] total
-",
+        .with_stderr_data(
+            str![[r#"
+[REMOVING] [ROOT]/home/.cargo/registry/index/-[HASH]
+[REMOVING] [ROOT]/home/.cargo/registry/src/-[HASH]
+[REMOVING] [ROOT]/home/.cargo/registry/cache/-[HASH]
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]]
+            .unordered(),
         )
         .run();
 }
@@ -896,20 +926,20 @@ fn max_size() {
         .collect();
 
     // This exercises the different boundary conditions.
-    for (clean_size, files, bytes) in [
-        (22, 0, 0),
-        (21, 1, 6),
-        (16, 1, 6),
-        (15, 2, 8),
-        (14, 2, 8),
-        (13, 3, 9),
-        (12, 4, 12),
-        (10, 4, 12),
-        (9, 5, 16),
-        (6, 5, 16),
-        (5, 6, 21),
-        (1, 6, 21),
-        (0, 7, 22),
+    for (clean_size, files) in [
+        (22, 0),
+        (21, 1),
+        (16, 1),
+        (15, 2),
+        (14, 2),
+        (13, 3),
+        (12, 4),
+        (10, 4),
+        (9, 5),
+        (6, 5),
+        (5, 6),
+        (1, 6),
+        (0, 7),
     ] {
         let (removed, kept) = names_by_timestamp.split_at(files);
         // --max-crate-size
@@ -919,19 +949,21 @@ fn max_size() {
             writeln!(stderr, "[REMOVING] [..]{name}.crate").unwrap();
         }
         let total_display = if removed.is_empty() {
-            String::new()
+            ""
         } else {
-            format!(", {bytes}B total")
+            ", [FILE_SIZE]B total"
         };
-        let files_display = if files == 1 {
-            format!("1 file")
+        let files_display = if files == 0 {
+            "0 files"
+        } else if files == 1 {
+            "1 file"
         } else {
-            format!("{files} files")
+            "[FILE_NUM] files"
         };
-        write!(stderr, "[REMOVED] {files_display}{total_display}").unwrap();
+        writeln!(stderr, "[REMOVED] {files_display}{total_display}").unwrap();
         cargo_process(&format!("clean gc -Zgc -v --max-crate-size={clean_size}"))
             .masquerade_as_nightly_cargo(&["gc"])
-            .with_stderr_unordered(&stderr)
+            .with_stderr_data(stderr.unordered())
             .run();
         for name in kept {
             assert!(cache_dir.join(format!("{name}.crate")).exists());
@@ -946,15 +978,15 @@ fn max_size() {
         for name in removed {
             writeln!(stderr, "[REMOVING] [..]{name}").unwrap();
         }
-        let total_display = if files == 0 {
-            String::new()
+        let total_display = if removed.is_empty() {
+            ""
         } else {
-            format!(", {bytes}B total")
+            ", [FILE_SIZE]B total"
         };
-        write!(stderr, "[REMOVED] {files_display}{total_display}").unwrap();
+        writeln!(stderr, "[REMOVED] {files_display}{total_display}").unwrap();
         cargo_process(&format!("clean gc -Zgc -v --max-src-size={clean_size}"))
             .masquerade_as_nightly_cargo(&["gc"])
-            .with_stderr_unordered(&stderr)
+            .with_stderr_data(stderr.unordered())
             .run();
         for name in kept {
             assert!(src_dir.join(name).exists());
@@ -989,7 +1021,10 @@ fn max_size_untracked_crate() {
     // This should scan the directory and populate the db with the size information.
     cargo_process("clean gc -Zgc -v --max-crate-size=100000")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr("[REMOVED] 0 files")
+        .with_stderr_data(str![[r#"
+[REMOVED] 0 files
+
+"#]])
         .run();
     // Check that it stored the size data.
     let _lock = gctx
@@ -1065,7 +1100,10 @@ fn max_size_untracked_src_from_use() {
     // Fix the size.
     p.cargo("clean gc -v --max-src-size=10000 -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr("[REMOVED] 0 files")
+        .with_stderr_data(str![[r#"
+[REMOVED] 0 files
+
+"#]])
         .run();
     max_size_untracked_verify(&gctx);
 }
@@ -1080,7 +1118,10 @@ fn max_size_untracked_src_from_clean() {
     // Clean should scan the src and update the db.
     p.cargo("clean gc -v --max-src-size=10000 -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr("[REMOVED] 0 files")
+        .with_stderr_data(str![[r#"
+[REMOVED] 0 files
+
+"#]])
         .run();
     max_size_untracked_verify(&gctx);
 }
@@ -1102,13 +1143,13 @@ fn max_download_size() {
         ("b-1.0.0", 1, 1, 7),
     ];
 
-    for (max_size, num_deleted, files_deleted, bytes) in [
-        (30, 0, 0, 0),
-        (29, 1, 1, 5),
-        (24, 2, 2, 9),
-        (20, 3, 3, 12),
-        (1, 7, 7, 29),
-        (0, 8, 8, 30),
+    for (max_size, num_deleted, files_deleted) in [
+        (30, 0, 0),
+        (29, 1, 1),
+        (24, 2, 2),
+        (20, 3, 3),
+        (1, 7, 7),
+        (0, 8, 8),
     ] {
         populate_cache(&gctx, &test_crates);
         // Determine the order things will be deleted.
@@ -1121,20 +1162,22 @@ fn max_download_size() {
         for name in removed {
             writeln!(stderr, "[REMOVING] [..]{name}").unwrap();
         }
-        let files_display = if files_deleted == 1 {
-            format!("1 file")
+        let files_display = if files_deleted == 0 {
+            "0 files"
+        } else if files_deleted == 1 {
+            "1 file"
         } else {
-            format!("{files_deleted} files")
+            "[FILE_NUM] files"
         };
         let total_display = if removed.is_empty() {
-            String::new()
+            ""
         } else {
-            format!(", {bytes}B total")
+            ", [FILE_SIZE]B total"
         };
-        write!(stderr, "[REMOVED] {files_display}{total_display}",).unwrap();
+        writeln!(stderr, "[REMOVED] {files_display}{total_display}",).unwrap();
         cargo_process(&format!("clean gc -Zgc -v --max-download-size={max_size}"))
             .masquerade_as_nightly_cargo(&["gc"])
-            .with_stderr_unordered(&stderr)
+            .with_stderr_data(stderr.unordered())
             .run();
     }
 }
@@ -1217,11 +1260,15 @@ fn package_cache_lock_during_build() {
         .masquerade_as_nightly_cargo(&["gc"])
         .env("CARGO_GC_AUTO_FREQUENCY", "always")
         .env("CARGO_LOG", "gc=debug")
-        .with_stderr_contains("[UPDATING] `dummy-registry` index")
-        .with_stderr_contains("[CHECKING] bar v1.0.0")
-        .with_stderr_contains("[CHECKING] foo2 v0.1.0 [..]")
-        .with_stderr_contains("[FINISHED] [..]")
-        .with_stderr_contains("[..]unable to acquire mutate lock, auto gc disabled")
+        .with_stderr_data(str![[r#"
+[UPDATING] `dummy-registry` index
+[LOCKING] 1 package to latest compatible version
+   [..]s DEBUG gc: unable to acquire mutate lock, auto gc disabled
+[CHECKING] bar v1.0.0
+[CHECKING] foo2 v0.1.0 ([ROOT]/foo2)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 
     // Ensure that the first build really blocked.
@@ -1250,12 +1297,11 @@ fn package_cache_lock_during_build() {
     assert!(output.status.success());
     // Validate the output of the clean.
     execs()
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [BLOCKING] waiting for file lock on package cache mutation
-[REMOVED] [..]
-",
-        )
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]])
         .run_output(&output);
 }
 
@@ -1274,13 +1320,12 @@ fn read_only_locking_auto_gc() {
     std::fs::set_permissions(&cargo_home, perms.clone()).unwrap();
     p.cargo("check -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [CHECKING] bar v1.0.0
-[CHECKING] foo v0.1.0 [..]
-[FINISHED] [..]
-",
-        )
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     // Try again without the last-use existing (such as if the cache was
     // populated by an older version of cargo).
@@ -1294,7 +1339,10 @@ fn read_only_locking_auto_gc() {
     std::fs::set_permissions(&cargo_home, perms.clone()).unwrap();
     p.cargo("check -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr("[FINISHED] [..]")
+        .with_stderr_data(str![[r#"
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     perms.set_readonly(false);
     std::fs::set_permissions(&cargo_home, perms).unwrap();
@@ -1316,7 +1364,10 @@ fn delete_index_also_deletes_crates() {
         .arg("--max-index-age=0 days")
         .arg("-Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr("[REMOVED] [..]")
+        .with_stderr_data(str![[r#"
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]])
         .run();
 
     assert_eq!(get_registry_names("src").len(), 0);
@@ -1376,7 +1427,10 @@ fn clean_syncs_missing_files() {
     // Clean should update the db.
     p.cargo("clean gc -v --max-download-size=1GB -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr("[REMOVED] 0 files")
+        .with_stderr_data(str![[r#"
+[REMOVED] 0 files
+
+"#]])
         .run();
 
     // Verify
@@ -1399,14 +1453,21 @@ fn offline_doesnt_auto_gc() {
     // Run offline, make sure it doesn't delete anything
     p.cargo("check --offline -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr("[CHECKING] foo v0.1.0[..]\n[FINISHED][..]")
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     assert_eq!(get_registry_names("src"), ["bar-1.0.0"]);
     assert_eq!(get_registry_names("cache"), ["bar-1.0.0.crate"]);
     // Run online, make sure auto-gc runs.
     p.cargo("check -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr("[FINISHED][..]")
+        .with_stderr_data(str![[r#"
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     assert_eq!(get_registry_names("src"), &[] as &[String]);
     assert_eq!(get_registry_names("cache"), &[] as &[String]);
@@ -1435,7 +1496,10 @@ fn can_handle_future_schema() -> anyhow::Result<()> {
     // Verify it doesn't blow up.
     p.cargo("clean gc --max-download-size=0 -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr("[REMOVED] 4 files, [..] total")
+        .with_stderr_data(str![[r#"
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]])
         .run();
     Ok(())
 }
@@ -1478,13 +1542,12 @@ fn clean_max_git_age() {
     p.cargo("update -p git_a -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
         .env("__CARGO_TEST_LAST_USE_NOW", days_ago_unix(2))
-        .with_stderr(
-            "\
-[UPDATING] git repository [..]
+        .with_stderr_data(str![[r#"
+[UPDATING] git repository `[ROOTURL]/git_a`
 [LOCKING] 1 package to latest compatible version
-[UPDATING] git_a v1.0.0 [..]
-",
-        )
+[UPDATING] git_a v1.0.0 ([ROOTURL]/git_a#[..]) -> #[..]
+
+"#]])
         .run();
 
     let db_names = get_git_db_names();
@@ -1497,12 +1560,11 @@ fn clean_max_git_age() {
     p.cargo("clean gc -v -Zgc")
         .arg("--max-git-co-age=3 days")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
-[REMOVING] [ROOT]/home/.cargo/git/checkouts/git_a-[..]/[..]
-[REMOVED] [..]
-",
-        )
+        .with_stderr_data(str![[r#"
+[REMOVING] [ROOT]/home/.cargo/git/checkouts/git_a-[HASH]/[..]
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]])
         .run();
 
     let db_names = get_git_db_names();
@@ -1514,12 +1576,11 @@ fn clean_max_git_age() {
     p.cargo("clean gc -v -Zgc")
         .arg("--max-git-co-age=0 days")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
-[REMOVING] [ROOT]/home/.cargo/git/checkouts/git_a-[..]/[..]
-[REMOVED] [..]
-",
-        )
+        .with_stderr_data(str![[r#"
+[REMOVING] [ROOT]/home/.cargo/git/checkouts/git_a-[HASH]/[..]
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]])
         .run();
 
     let db_names = get_git_db_names();
@@ -1531,13 +1592,12 @@ fn clean_max_git_age() {
     p.cargo("clean gc -v -Zgc")
         .arg("--max-git-db-age=1 days")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
-[REMOVING] [ROOT]/home/.cargo/git/db/git_a-[..]
-[REMOVING] [ROOT]/home/.cargo/git/checkouts/git_a-[..]
-[REMOVED] [..]
-",
-        )
+        .with_stderr_data(str![[r#"
+[REMOVING] [ROOT]/home/.cargo/git/db/git_a-[HASH]
+[REMOVING] [ROOT]/home/.cargo/git/checkouts/git_a-[HASH]
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]])
         .run();
 
     let db_names = get_git_db_names();
@@ -1560,23 +1620,21 @@ fn clean_max_src_crate_age() {
     p.cargo("update -p bar -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
         .env("__CARGO_TEST_LAST_USE_NOW", days_ago_unix(2))
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
 [LOCKING] 1 package to latest compatible version
 [UPDATING] bar v1.0.0 -> v1.0.1
-",
-        )
+
+"#]])
         .run();
     p.cargo("fetch -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
         .env("__CARGO_TEST_LAST_USE_NOW", days_ago_unix(2))
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [DOWNLOADING] crates ...
-[DOWNLOADED] bar v1.0.1 [..]
-",
-        )
+[DOWNLOADED] bar v1.0.1 (registry `dummy-registry`)
+
+"#]])
         .run();
 
     assert_eq!(get_registry_names("src"), ["bar-1.0.0", "bar-1.0.1"]);
@@ -1589,48 +1647,44 @@ fn clean_max_src_crate_age() {
     p.cargo("clean gc -v -Zgc")
         .arg("--max-src-age=3 days")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
-[REMOVING] [..]/bar-1.0.0
-[REMOVED] [..]
-",
-        )
+        .with_stderr_data(str![[r#"
+[REMOVING] [ROOT]/home/.cargo/registry/src/-[HASH]/bar-1.0.0
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]])
         .run();
 
     // delete the second src
     p.cargo("clean gc -v -Zgc")
         .arg("--max-src-age=0 days")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
-[REMOVING] [..]/bar-1.0.1
-[REMOVED] [..]
-",
-        )
+        .with_stderr_data(str![[r#"
+[REMOVING] [ROOT]/home/.cargo/registry/src/-[HASH]/bar-1.0.1
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]])
         .run();
 
     // delete the old crate
     p.cargo("clean gc -v -Zgc")
         .arg("--max-crate-age=3 days")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
-[REMOVING] [..]/bar-1.0.0.crate
-[REMOVED] [..]
-",
-        )
+        .with_stderr_data(str![[r#"
+[REMOVING] [ROOT]/home/.cargo/registry/cache/-[HASH]/bar-1.0.0.crate
+[REMOVED] 1 file, [FILE_SIZE]B total
+
+"#]])
         .run();
 
     // delete the seecond crate
     p.cargo("clean gc -v -Zgc")
         .arg("--max-crate-age=0 days")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
-[REMOVING] [..]/bar-1.0.1.crate
-[REMOVED] [..]
-",
-        )
+        .with_stderr_data(str![[r#"
+[REMOVING] [ROOT]/home/.cargo/registry/cache/-[HASH]/bar-1.0.1.crate
+[REMOVED] 1 file, [FILE_SIZE]B total
+
+"#]])
         .run();
 }
 
@@ -1706,9 +1760,9 @@ fn clean_max_git_size() {
 
     p.cargo(&format!("clean gc --max-git-size={threshold} -Zgc -v"))
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(&format!(
+        .with_stderr_data(&format!(
             "\
-[REMOVING] [ROOT]/home/.cargo/git/checkouts/{db_name}/{first_co_name}
+[REMOVING] [ROOT]/home/.cargo/git/checkouts/bar-[HASH]/{first_co_name}
 [REMOVED] [..]
 "
         ))
@@ -1717,13 +1771,16 @@ fn clean_max_git_size() {
     // And then try cleaning everything.
     p.cargo("clean gc --max-git-size=0 -Zgc -v")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr_unordered(&format!(
-            "\
-[REMOVING] [ROOT]/home/.cargo/git/checkouts/{db_name}/{second_co_name}
-[REMOVING] [ROOT]/home/.cargo/git/db/{db_name}
+        .with_stderr_data(
+            format!(
+                "\
+[REMOVING] [ROOT]/home/.cargo/git/checkouts/bar-[HASH]/{second_co_name}
+[REMOVING] [ROOT]/home/.cargo/git/db/bar-[HASH]
 [REMOVED] [..]
 "
-        ))
+            )
+            .unordered(),
+        )
         .run();
 }
 
@@ -1752,30 +1809,27 @@ fn clean_max_git_size_untracked() {
     setup_fake_git_sizes("example", 5000, &[1000, 2000]);
     cargo_process(&format!("clean gc -Zgc -v --max-git-size=7000"))
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [REMOVING] [ROOT]/home/.cargo/git/checkouts/example/co0
-[REMOVED] [..]
-",
-        )
+[REMOVED] 1 file, [FILE_SIZE]B total
+
+"#]])
         .run();
     cargo_process(&format!("clean gc -Zgc -v --max-git-size=5000"))
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [REMOVING] [ROOT]/home/.cargo/git/checkouts/example/co1
-[REMOVED] [..]
-",
-        )
+[REMOVED] 1 file, [FILE_SIZE]B total
+
+"#]])
         .run();
     cargo_process(&format!("clean gc -Zgc -v --max-git-size=0"))
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [REMOVING] [ROOT]/home/.cargo/git/db/example
-[REMOVED] [..]
-",
-        )
+[REMOVED] 1 file, [FILE_SIZE]B total
+
+"#]])
         .run();
 }
 
@@ -1791,14 +1845,13 @@ fn clean_max_git_size_deletes_co_from_db() {
     // deletes all checkouts.
     cargo_process(&format!("clean gc -Zgc -v --max-git-size=3000"))
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [REMOVING] [ROOT]/home/.cargo/git/db/abc
 [REMOVING] [ROOT]/home/.cargo/git/checkouts/abc/co1
 [REMOVING] [ROOT]/home/.cargo/git/checkouts/abc/co0
-[REMOVED] [..]
-",
-        )
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]])
         .run();
 }
 
@@ -1812,12 +1865,14 @@ fn handles_missing_index() {
     paths::home().join(".cargo/registry/index").rm_rf();
     cargo_process("clean gc -v --max-download-size=0 -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr_unordered(
-            "\
-[REMOVING] [ROOT]/home/.cargo/registry/cache/[..]
-[REMOVING] [ROOT]/home/.cargo/registry/src/[..]
-[REMOVED] [..]
-",
+        .with_stderr_data(
+            str![[r#"
+[REMOVING] [ROOT]/home/.cargo/registry/cache/-[HASH]
+[REMOVING] [ROOT]/home/.cargo/registry/src/-[HASH]
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]]
+            .unordered(),
         )
         .run();
 }
@@ -1853,12 +1908,11 @@ fn handles_missing_git_db() {
     paths::home().join(".cargo/git/db").rm_rf();
     cargo_process("clean gc -v --max-git-size=0 -Zgc")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stderr(
-            "\
-[REMOVING] [ROOT]/home/.cargo/git/checkouts/[..]
-[REMOVED] [..]
-",
-        )
+        .with_stderr_data(str![[r#"
+[REMOVING] [ROOT]/home/.cargo/git/checkouts/bar-[HASH]
+[REMOVED] [FILE_NUM] files, [FILE_SIZE]B total
+
+"#]])
         .run();
 }
 
@@ -1873,19 +1927,18 @@ fn clean_gc_quiet_is_quiet() {
         .run();
     p.cargo("clean gc --quiet -Zgc --dry-run")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stdout("")
-        .with_stderr("")
+        .with_stdout_data("")
+        .with_stderr_data("")
         .run();
     // Verify exact same command without -q would actually display something.
     p.cargo("clean gc -Zgc --dry-run")
         .masquerade_as_nightly_cargo(&["gc"])
-        .with_stdout("")
-        .with_stderr(
-            "\
-[SUMMARY] [..] files, [..] total
+        .with_stdout_data("")
+        .with_stderr_data(str![[r#"
+[SUMMARY] [FILE_NUM] files, [FILE_SIZE]B total
 [WARNING] no files deleted due to --dry-run
-",
-        )
+
+"#]])
         .run();
 }
 
@@ -1951,7 +2004,16 @@ fn compatible_with_older_cargo() {
     assert_eq!(get_registry_names("src"), ["middle-1.0.0", "new-1.0.0"]);
     assert_eq!(
         get_registry_names("cache"),
-        ["middle-1.0.0.crate", "new-1.0.0.crate", "old-1.0.0.crate"]
+        // Duplicate crates from two different cache location
+        // because we're changing how SourceId is hashed.
+        // This change should be reverted once rust-lang/cargo#14917 lands.
+        [
+            "middle-1.0.0.crate",
+            "middle-1.0.0.crate",
+            "new-1.0.0.crate",
+            "new-1.0.0.crate",
+            "old-1.0.0.crate"
+        ]
     );
 
     // T-0 months: Current version, make sure it can read data from stable,
@@ -1974,7 +2036,10 @@ fn compatible_with_older_cargo() {
     assert_eq!(get_registry_names("src"), ["new-1.0.0"]);
     assert_eq!(
         get_registry_names("cache"),
-        ["middle-1.0.0.crate", "new-1.0.0.crate"]
+        // Duplicate crates from two different cache location
+        // because we're changing how SourceId is hashed.
+        // This change should be reverted once rust-lang/cargo#14917 lands.
+        ["middle-1.0.0.crate", "new-1.0.0.crate", "new-1.0.0.crate"]
     );
 }
 

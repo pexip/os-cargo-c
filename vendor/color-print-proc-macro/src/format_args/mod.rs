@@ -14,7 +14,7 @@ use crate::parse;
 use crate::util::{self, inner_span};
 use format_arg::FormatArg;
 
-/// Retrieves the original format string and arguments given to the three public macros.
+/// Retrieves the original format string and arguments given to the public macros.
 pub fn get_args_and_format_string(
     input: TokenStream,
 ) -> Result<(LitStr, Punctuated<FormatArg, Comma>), SpanError> {

@@ -62,3 +62,24 @@ pub extern "C" fn root(a: BarHandle, c: C)
 #[no_mangle]
 pub extern "C" fn cond(a: ConditionalField)
 { }
+
+// src/lib.rs
+#[repr(C)]
+struct Normal {
+    x: i32,
+    y: f32,
+}
+
+#[cfg(windows)]
+extern "C" {
+    fn foo() -> i32;
+
+    fn bar(a: Normal);
+}
+
+#[cfg(windows)]
+#[no_mangle]
+pub static mut global_array_with_different_sizes: [i32; 2] = [123, 456];
+#[cfg(unix)]
+#[no_mangle]
+pub static mut global_array_with_different_sizes: [i32; 1] = [7890];

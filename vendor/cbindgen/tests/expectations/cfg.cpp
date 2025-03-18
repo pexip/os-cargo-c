@@ -202,7 +202,29 @@ struct ConditionalField {
   ;
 };
 
+struct Normal {
+  int32_t x;
+  float y;
+
+  bool operator==(const Normal& other) const {
+    return x == other.x &&
+           y == other.y;
+  }
+  bool operator!=(const Normal& other) const {
+    return x != other.x ||
+           y != other.y;
+  }
+};
+
 extern "C" {
+
+#if defined(PLATFORM_WIN)
+extern int32_t global_array_with_different_sizes[2];
+#endif
+
+#if defined(PLATFORM_UNIX)
+extern int32_t global_array_with_different_sizes[1];
+#endif
 
 #if (defined(PLATFORM_UNIX) && defined(X11))
 void root(FooHandle a, C c);
@@ -214,4 +236,12 @@ void root(BarHandle a, C c);
 
 void cond(ConditionalField a);
 
-} // extern "C"
+#if defined(PLATFORM_WIN)
+extern int32_t foo();
+#endif
+
+#if defined(PLATFORM_WIN)
+extern void bar(Normal a);
+#endif
+
+}  // extern "C"

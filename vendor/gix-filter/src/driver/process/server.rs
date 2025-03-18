@@ -14,7 +14,6 @@ pub struct Request<'a> {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod next_request {
     use bstr::BString;
 
@@ -32,7 +31,6 @@ pub mod next_request {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod handshake {
     /// The error returned by [Server::handshake()][super::Server::handshake()].
     #[derive(Debug, thiserror::Error)]
@@ -194,7 +192,7 @@ impl Server {
                     actual: line.into(),
                 })?;
             assert!(tokens.next().is_none(), "configured to yield at most two tokens");
-            meta.push((key.as_bstr().to_string(), value.into()))
+            meta.push((key.as_bstr().to_string(), value.into()));
         }
 
         drop(read);

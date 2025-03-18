@@ -17,7 +17,7 @@ impl packed::Buffer {
         let name = name.try_into()?;
         let mut buf = BString::default();
         for inbetween in &["", "tags", "heads", "remotes"] {
-            let (name, was_absolute) = if name.looks_like_full_name() {
+            let (name, was_absolute) = if name.looks_like_full_name(false) {
                 let name = FullNameRef::new_unchecked(name.as_bstr());
                 let name = match transform_full_name_for_lookup(name) {
                     None => return Ok(None),
@@ -25,7 +25,7 @@ impl packed::Buffer {
                 };
                 (name, true)
             } else {
-                let full_name = name.construct_full_name_ref(inbetween, &mut buf);
+                let full_name = name.construct_full_name_ref(inbetween, &mut buf, false);
                 (full_name, false)
             };
             match self.try_find_full_name(name)? {
@@ -129,7 +129,6 @@ mod error {
 pub use error::Error;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod existing {
 
     /// The error returned by [`find_existing()`][super::packed::Buffer::find()]

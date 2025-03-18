@@ -1,12 +1,16 @@
 //! Tests for the --config CLI option.
 
-use super::config::{
-    assert_error, assert_match, read_output, write_config_at, write_config_toml,
-    GlobalContextBuilder,
-};
-use cargo::util::context::Definition;
-use cargo_test_support::paths;
 use std::{collections::HashMap, fs};
+
+use cargo::util::context::Definition;
+use cargo_test_support::compare::assert_e2e;
+use cargo_test_support::paths;
+use cargo_test_support::prelude::*;
+use cargo_test_support::str;
+
+use super::config::{
+    assert_error, read_output, write_config_at, write_config_toml, GlobalContextBuilder,
+};
 
 #[cargo_test]
 fn basic() {
@@ -348,10 +352,11 @@ fn unused_key() {
 
     gctx.build_config().unwrap();
     let output = read_output(gctx);
-    let expected = "\
-warning: unused config key `build.unused` in `--config cli option`
-";
-    assert_match(expected, &output);
+    let expected = str![[r#"
+[WARNING] unused config key `build.unused` in `--config cli option`
+
+"#]];
+    assert_e2e().eq(&output, expected);
 }
 
 #[cargo_test]

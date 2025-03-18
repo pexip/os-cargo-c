@@ -13,11 +13,17 @@
 edition = "2021"
 rust-version = "1.65"
 name = "p384"
-version = "0.13.0"
+version = "0.13.1"
 authors = [
     "RustCrypto Developers",
     "Frank Denis <github@pureftpd.org>",
 ]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = """
 Pure Rust implementation of the NIST P-384 (a.k.a. secp384r1) elliptic curve
 as defined in SP 800-186 with support for ECDH, ECDSA signing/verification,
@@ -44,13 +50,27 @@ rustdoc-args = [
     "docsrs",
 ]
 
+[lib]
+name = "p384"
+path = "src/lib.rs"
+
+[[test]]
+name = "affine"
+path = "tests/affine.rs"
+
+[[test]]
+name = "projective"
+path = "tests/projective.rs"
+
 [[bench]]
 name = "field"
+path = "benches/field.rs"
 harness = false
 required-features = ["expose-field"]
 
 [[bench]]
 name = "scalar"
+path = "benches/scalar.rs"
 harness = false
 
 [dependencies.ecdsa-core]

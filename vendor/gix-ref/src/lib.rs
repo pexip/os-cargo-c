@@ -23,8 +23,6 @@
 #![cfg_attr(all(doc, feature = "document-features"), feature(doc_cfg, doc_auto_cfg))]
 #![deny(missing_docs, rust_2018_idioms, unsafe_code)]
 
-use std::borrow::Cow;
-
 use gix_hash::{oid, ObjectId};
 pub use gix_object::bstr;
 use gix_object::bstr::{BStr, BString};
@@ -35,13 +33,10 @@ pub use store_impl::{file, packed};
 
 mod fullname;
 ///
-#[allow(clippy::empty_docs)]
 pub mod name;
 ///
-#[allow(clippy::empty_docs)]
 pub mod namespace;
 ///
-#[allow(clippy::empty_docs)]
 pub mod transaction;
 
 mod parse;
@@ -52,18 +47,14 @@ pub use raw::Reference;
 mod target;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod log;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod peel;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod store {
     ///
-    #[allow(clippy::empty_docs)]
     pub mod init {
 
         /// Options for use during [initialization](crate::file::Store::at).
@@ -123,19 +114,15 @@ pub(crate) struct Store {
     inner: store::State,
 }
 
-/// A validated complete and fully qualified referenced reference name, safe to use for all operations.
+/// A validated complete and fully qualified reference name, safe to use for all operations.
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FullName(pub(crate) BString);
 
-/// A validated complete and fully qualified referenced reference name, safe to use for all operations.
+/// A validated complete and fully qualified reference name, safe to use for all operations.
 #[derive(Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
 #[repr(transparent)]
 pub struct FullNameRef(BStr);
-
-/// A validated and potentially partial reference name, safe to use for common operations.
-#[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone)]
-pub struct PartialNameCow<'a>(Cow<'a, BStr>);
 
 /// A validated and potentially partial reference name, safe to use for common operations.
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd)]
@@ -144,18 +131,20 @@ pub struct PartialNameRef(BStr);
 
 /// A validated and potentially partial reference name, safe to use for common operations.
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PartialName(BString);
 
 /// A _validated_ prefix for references to act as a namespace.
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Namespace(BString);
 
 /// Denotes the kind of reference.
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Kind {
-    /// A ref that points to an object id
-    Peeled,
+    /// A ref that points to an object id directly.
+    Object,
     /// A ref that points to another reference, adding a level of indirection.
     ///
     /// It can be resolved to an id using the [`peel_in_place_to_id()`][`crate::file::ReferenceExt::peel_to_id_in_place()`] method.
@@ -166,6 +155,7 @@ pub enum Kind {
 ///
 /// This translates into a prefix containing all references of a given category.
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Category<'a> {
     /// A tag in `refs/tags`
     Tag,
@@ -185,6 +175,7 @@ pub enum Category<'a> {
     /// A `PseudoRef` in another _linked_ worktree, never in the main one, like `worktrees/<id>/HEAD`.
     LinkedPseudoRef {
         /// The name of the worktree.
+        #[cfg_attr(feature = "serde", serde(borrow))]
         name: &'a BStr,
     },
     /// Any reference that is prefixed with `worktrees/<id>/refs/`.
@@ -205,8 +196,8 @@ pub enum Category<'a> {
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Target {
-    /// A ref that points to an object id
-    Peeled(ObjectId),
+    /// A ref that points directly to an object id.
+    Object(ObjectId),
     /// A ref that points to another reference by its validated name, adding a level of indirection.
     ///
     /// Note that this is an extension of gitoxide which will be helpful in logging all reference changes.
@@ -216,8 +207,8 @@ pub enum Target {
 /// Denotes a ref target, equivalent to [`Kind`], but with immutable data.
 #[derive(PartialEq, Eq, Debug, Hash, Ord, PartialOrd, Clone, Copy)]
 pub enum TargetRef<'a> {
-    /// A ref that points to an object id
-    Peeled(&'a oid),
+    /// A ref that points directly to an object id.
+    Object(&'a oid),
     /// A ref that points to another reference by its validated name, adding a level of indirection.
     Symbolic(&'a FullNameRef),
 }

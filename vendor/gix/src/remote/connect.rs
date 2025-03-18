@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use gix_protocol::transport::client::Transport;
 
-use crate::{remote::Connection, Remote};
+use crate::{config::tree::Protocol, remote::Connection, Remote};
 
 mod error {
     use crate::{bstr::BString, config, remote};
@@ -52,7 +52,7 @@ pub use error::Error;
 impl<'repo> Remote<'repo> {
     /// Create a new connection using `transport` to communicate, with `progress` to indicate changes.
     ///
-    /// Note that this method expects the `transport` to be created by the user, which would involve the [`url()`][Self::url()].
+    /// Note that this method expects the `transport` to be created by the user, which would involve the [`url()`](Self::url()).
     /// It's meant to be used when async operation is needed with runtimes of the user's choice.
     pub fn to_connection_with_transport<T>(&self, transport: T) -> Connection<'_, 'repo, T>
     where
@@ -63,7 +63,8 @@ impl<'repo> Remote<'repo> {
             remote: self,
             authenticate: None,
             transport_options: None,
-            transport,
+            handshake: None,
+            transport: gix_protocol::SendFlushOnDrop::new(transport, trace),
             trace,
         }
     }
@@ -137,7 +138,7 @@ impl<'repo> Remote<'repo> {
         }
 
         let version = crate::config::tree::Protocol::VERSION
-            .try_into_protocol_version(self.repo.config.resolved.integer("protocol", None, "version"))
+            .try_into_protocol_version(self.repo.config.resolved.integer(Protocol::VERSION))
             .map_err(|err| Error::UnknownProtocol { source: err })?;
 
         let url = self.url(direction).ok_or(Error::MissingUrl { direction })?.to_owned();

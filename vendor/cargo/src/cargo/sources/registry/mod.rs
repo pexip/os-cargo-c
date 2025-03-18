@@ -422,7 +422,7 @@ pub trait RegistryData {
     /// Returns the [`Path`] to the [`Filesystem`].
     fn assert_index_locked<'a>(&self, path: &'a Filesystem) -> &'a Path;
 
-    /// Block until all outstanding Poll::Pending requests are Poll::Ready.
+    /// Block until all outstanding `Poll::Pending` requests are `Poll::Ready`.
     fn block_until_ready(&mut self) -> CargoResult<()>;
 }
 
@@ -445,7 +445,7 @@ pub enum MaybeLock {
 
 mod download;
 mod http_remote;
-mod index;
+pub(crate) mod index;
 pub use index::IndexSummary;
 mod local;
 mod remote;
@@ -642,10 +642,10 @@ impl<'gctx> RegistrySource<'gctx> {
         let prefix = unpack_dir.file_name().unwrap();
         let parent = unpack_dir.parent().unwrap();
         for entry in tar.entries()? {
-            let mut entry = entry.with_context(|| "failed to iterate over archive")?;
+            let mut entry = entry.context("failed to iterate over archive")?;
             let entry_path = entry
                 .path()
-                .with_context(|| "failed to read entry path")?
+                .context("failed to read entry path")?
                 .into_owned();
 
             // We're going to unpack this tarball into the global source
@@ -719,7 +719,7 @@ impl<'gctx> RegistrySource<'gctx> {
             .unpack_package(package, path)
             .with_context(|| format!("failed to unpack package `{}`", package))?;
         let mut src = PathSource::new(&path, self.source_id, self.gctx);
-        src.update()?;
+        src.load()?;
         let mut pkg = match src.download(package)? {
             MaybePackage::Ready(pkg) => pkg,
             MaybePackage::Download { .. } => unreachable!(),
@@ -779,7 +779,9 @@ impl<'gctx> Source for RegistrySource<'gctx> {
             ready!(self
                 .index
                 .query_inner(dep.package_name(), &req, &mut *self.ops, &mut |s| {
-                    if dep.matches(s.as_summary()) {
+                    if matches!(s, IndexSummary::Candidate(_) | IndexSummary::Yanked(_))
+                        && dep.matches(s.as_summary())
+                    {
                         // We are looking for a package from a lock file so we do not care about yank
                         callback(s)
                     }
@@ -797,14 +799,14 @@ impl<'gctx> Source for RegistrySource<'gctx> {
                 .index
                 .query_inner(dep.package_name(), &req, &mut *self.ops, &mut |s| {
                     let matched = match kind {
-                        QueryKind::Exact => {
+                        QueryKind::Exact | QueryKind::RejectedVersions => {
                             if req.is_precise() && self.gctx.cli_unstable().unstable_options {
                                 dep.matches_prerelease(s.as_summary())
                             } else {
                                 dep.matches(s.as_summary())
                             }
                         }
-                        QueryKind::Alternatives => true,
+                        QueryKind::AlternativeNames => true,
                         QueryKind::Normalized => true,
                     };
                     if !matched {
@@ -813,21 +815,34 @@ impl<'gctx> Source for RegistrySource<'gctx> {
                     // Next filter out all yanked packages. Some yanked packages may
                     // leak through if they're in a whitelist (aka if they were
                     // previously in `Cargo.lock`
-                    if !s.is_yanked() {
-                        callback(s);
-                    } else if self.yanked_whitelist.contains(&s.package_id()) {
-                        callback(s);
-                    } else if req.is_precise() {
-                        precise_yanked_in_use = true;
-                        if self.gctx.cli_unstable().unstable_options {
-                            callback(s);
+                    match s {
+                        s @ _ if kind == QueryKind::RejectedVersions => callback(s),
+                        s @ IndexSummary::Candidate(_) => callback(s),
+                        s @ IndexSummary::Yanked(_) => {
+                            if self.yanked_whitelist.contains(&s.package_id()) {
+                                callback(s);
+                            } else if req.is_precise() {
+                                precise_yanked_in_use = true;
+                                callback(s);
+                            }
+                        }
+                        IndexSummary::Unsupported(summary, v) => {
+                            tracing::debug!(
+                                "unsupported schema version {} ({} {})",
+                                v,
+                                summary.name(),
+                                summary.version()
+                            );
+                        }
+                        IndexSummary::Invalid(summary) => {
+                            tracing::debug!("invalid ({} {})", summary.name(), summary.version());
+                        }
+                        IndexSummary::Offline(summary) => {
+                            tracing::debug!("offline ({} {})", summary.name(), summary.version());
                         }
                     }
                 }))?;
             if precise_yanked_in_use {
-                self.gctx
-                    .cli_unstable()
-                    .fail_if_stable_opt("--precise <yanked-version>", 4225)?;
                 let name = dep.package_name();
                 let version = req
                     .precise_version()
@@ -844,7 +859,7 @@ impl<'gctx> Source for RegistrySource<'gctx> {
                 return Poll::Ready(Ok(()));
             }
             let mut any_pending = false;
-            if kind == QueryKind::Alternatives || kind == QueryKind::Normalized {
+            if kind == QueryKind::AlternativeNames || kind == QueryKind::Normalized {
                 // Attempt to handle misspellings by searching for a chain of related
                 // names to the original name. The resolver will later
                 // reject any candidates that have the wrong name, and with this it'll
@@ -861,7 +876,13 @@ impl<'gctx> Source for RegistrySource<'gctx> {
                     }
                     any_pending |= self
                         .index
-                        .query_inner(name_permutation, &req, &mut *self.ops, f)?
+                        .query_inner(name_permutation, &req, &mut *self.ops, &mut |s| {
+                            if !s.is_yanked() {
+                                f(s);
+                            } else if kind == QueryKind::AlternativeNames {
+                                f(s);
+                            }
+                        })?
                         .is_pending();
                 }
             }
@@ -967,7 +988,7 @@ impl RegistryConfig {
     const NAME: &'static str = "config.json";
 }
 
-/// Get the maximum upack size that Cargo permits
+/// Get the maximum unpack size that Cargo permits
 /// based on a given `size` of your compressed file.
 ///
 /// Returns the larger one between `size * max compression ratio`

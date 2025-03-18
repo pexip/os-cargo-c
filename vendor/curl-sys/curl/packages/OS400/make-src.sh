@@ -30,6 +30,15 @@ SCRIPTDIR=$(dirname "${0}")
 cd "${TOPDIR}/src" || exit 1
 
 
+#       Check if built-in manual can be generated.
+
+USE_MANUAL=
+if [ -f "${IFSDIR}/docs/curl.txt" ] && [ -n "${PASEPERL}" ]
+then    "${PASEPERL}" ./mkhelp.pl < "${IFSDIR}/docs/curl.txt" > tool_hugehelp.c
+        USE_MANUAL="'USE_MANUAL'"
+fi
+
+
 #       Get source lists.
 #       CURL_CFILES are in the current directory.
 #       CURLX_CFILES are in the lib directory and need to be recompiled because
@@ -37,6 +46,13 @@ cd "${TOPDIR}/src" || exit 1
 
 get_make_vars Makefile.inc
 
+
+#       Add hugehelp, as it is not included in Makefile.inc.
+if [ "${USE_MANUAL}" = "'USE_MANUAL'" ]
+then
+        CURL_CFILES="${CURL_CFILES} tool_hugehelp.c"
+        CURL_HFILES="${CURL_HFILES} tool_hugehelp.h"
+fi
 
 #       Compile the sources into modules.
 
@@ -46,15 +62,16 @@ MODULES=
 # shellcheck disable=SC2034
 INCLUDES="'${TOPDIR}/lib'"
 
+# shellcheck disable=SC2153
 for SRC in ${CURLX_CFILES}
 do      MODULE=$(db2_name "${SRC}")
         MODULE=$(db2_name "X${MODULE}")
-        make_module "${MODULE}" "${SRC}"
+        make_module "${MODULE}" "${SRC}" "${USE_MANUAL}"
 done
 
 for SRC in ${CURL_CFILES}
 do      MODULE=$(db2_name "${SRC}")
-        make_module "${MODULE}" "${SRC}"
+        make_module "${MODULE}" "${SRC}" "${USE_MANUAL}"
 done
 
 

@@ -2,7 +2,7 @@ use gix_hash::ObjectId;
 
 use crate::{log::Line, store_impl::file::log::LineRef};
 
-impl<'a> LineRef<'a> {
+impl LineRef<'_> {
     /// Convert this instance into its mutable counterpart
     pub fn to_owned(&self) -> Line {
         (*self).into()
@@ -48,7 +48,7 @@ mod write {
     }
 }
 
-impl<'a> LineRef<'a> {
+impl LineRef<'_> {
     /// The previous object id of the ref. It will be a null hash if there was no previous id as
     /// this ref is being created.
     pub fn previous_oid(&self) -> ObjectId {
@@ -72,8 +72,8 @@ impl<'a> From<LineRef<'a>> for Line {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod decode {
+    use crate::{file::log::LineRef, parse::hex_hash};
     use gix_object::bstr::{BStr, ByteSlice};
     use winnow::{
         combinator::{alt, eof, fail, opt, preceded, rest, terminated},
@@ -82,10 +82,7 @@ pub mod decode {
         token::take_while,
     };
 
-    use crate::{file::log::LineRef, parse::hex_hash};
-
     ///
-    #[allow(clippy::empty_docs)]
     mod error {
         use gix_object::bstr::{BString, ByteSlice};
 
@@ -137,34 +134,57 @@ pub mod decode {
     fn one<'a, E: ParserError<&'a [u8]> + AddContext<&'a [u8], StrContext>>(
         bytes: &mut &'a [u8],
     ) -> PResult<LineRef<'a>, E> {
-        (
-            (
+        let mut tokens = bytes.splitn(2, |b| *b == b'\t');
+        if let (Some(mut first), Some(mut second)) = (tokens.next(), tokens.next()) {
+            let (old, new, signature) = (
                 terminated(hex_hash, b" ").context(StrContext::Expected("<old-hexsha>".into())),
                 terminated(hex_hash, b" ").context(StrContext::Expected("<new-hexsha>".into())),
                 gix_actor::signature::decode.context(StrContext::Expected("<name> <<email>> <timestamp>".into())),
             )
                 .context(StrContext::Expected(
                     "<old-hexsha> <new-hexsha> <name> <<email>> <timestamp> <tz>\\t<message>".into(),
-                )),
-            alt((
-                preceded(
-                    b'\t',
-                    message.context(StrContext::Expected("<optional message>".into())),
-                ),
-                b'\n'.value(Default::default()),
-                eof.value(Default::default()),
-                fail.context(StrContext::Expected(
-                    "log message must be separated from signature with whitespace".into(),
-                )),
-            )),
-        )
-            .map(|((old, new, signature), message)| LineRef {
+                ))
+                .parse_next(&mut first)?;
+
+            // forward the buffer🤦‍♂️
+            message.parse_next(bytes)?;
+            let message = message(&mut second)?;
+            Ok(LineRef {
                 previous_oid: old,
                 new_oid: new,
                 signature,
                 message,
             })
-            .parse_next(bytes)
+        } else {
+            (
+                (
+                    terminated(hex_hash, b" ").context(StrContext::Expected("<old-hexsha>".into())),
+                    terminated(hex_hash, b" ").context(StrContext::Expected("<new-hexsha>".into())),
+                    gix_actor::signature::decode.context(StrContext::Expected("<name> <<email>> <timestamp>".into())),
+                )
+                    .context(StrContext::Expected(
+                        "<old-hexsha> <new-hexsha> <name> <<email>> <timestamp> <tz>\\t<message>".into(),
+                    )),
+                alt((
+                    preceded(
+                        b'\t',
+                        message.context(StrContext::Expected("<optional message>".into())),
+                    ),
+                    b'\n'.value(Default::default()),
+                    eof.value(Default::default()),
+                    fail.context(StrContext::Expected(
+                        "log message must be separated from signature with whitespace".into(),
+                    )),
+                )),
+            )
+                .map(|((old, new, signature), message)| LineRef {
+                    previous_oid: old,
+                    new_oid: new,
+                    signature,
+                    message,
+                })
+                .parse_next(bytes)
+        }
     }
 
     #[cfg(test)]

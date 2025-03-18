@@ -11,13 +11,20 @@
 
 [package]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.83"
 name = "crates-io"
-version = "0.40.2"
+version = "0.40.8"
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = """
 Helpers for interacting with crates.io
 """
 homepage = "https://github.com/rust-lang/cargo"
+readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rust-lang/cargo"
 
@@ -29,20 +36,20 @@ path = "lib.rs"
 version = "0.4.46"
 
 [dependencies.percent-encoding]
-version = "2.3"
+version = "2.3.1"
 
 [dependencies.serde]
-version = "1.0.197"
+version = "1.0.204"
 features = ["derive"]
 
 [dependencies.serde_json]
-version = "1.0.115"
+version = "1.0.120"
 
 [dependencies.thiserror]
-version = "1.0.58"
+version = "1.0.63"
 
 [dependencies.url]
-version = "2.5.0"
+version = "2.5.2"
 
 [lints.clippy]
 dbg_macro = "warn"
@@ -53,6 +60,10 @@ self_named_module_files = "warn"
 
 [lints.clippy.all]
 level = "allow"
+priority = -2
+
+[lints.clippy.correctness]
+level = "warn"
 priority = -1
 
 [lints.rust]

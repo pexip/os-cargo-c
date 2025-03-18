@@ -71,7 +71,7 @@ mrb_value request_get_method(mrb_state *mrb, mrb_value self) {
   const auto &req = downstream->request();
   auto method = http2::to_method_string(req.method);
 
-  return mrb_str_new(mrb, method.c_str(), method.size());
+  return mrb_str_new(mrb, method.data(), method.size());
 }
 } // namespace
 
@@ -90,7 +90,7 @@ mrb_value request_set_method(mrb_state *mrb, mrb_value self) {
     mrb_raise(mrb, E_RUNTIME_ERROR, "method must not be empty string");
   }
   auto token =
-      http2::lookup_method_token(reinterpret_cast<const uint8_t *>(method), n);
+    http2::lookup_method_token(StringRef{method, static_cast<size_t>(n)});
   if (token == -1) {
     mrb_raise(mrb, E_RUNTIME_ERROR, "method not supported");
   }
@@ -107,7 +107,7 @@ mrb_value request_get_authority(mrb_state *mrb, mrb_value self) {
   auto downstream = data->downstream;
   const auto &req = downstream->request();
 
-  return mrb_str_new(mrb, req.authority.c_str(), req.authority.size());
+  return mrb_str_new(mrb, req.authority.data(), req.authority.size());
 }
 } // namespace
 
@@ -129,7 +129,7 @@ mrb_value request_set_authority(mrb_state *mrb, mrb_value self) {
   }
 
   req.authority =
-      make_string_ref(balloc, StringRef{authority, static_cast<size_t>(n)});
+    make_string_ref(balloc, StringRef{authority, static_cast<size_t>(n)});
 
   return self;
 }
@@ -141,7 +141,7 @@ mrb_value request_get_scheme(mrb_state *mrb, mrb_value self) {
   auto downstream = data->downstream;
   const auto &req = downstream->request();
 
-  return mrb_str_new(mrb, req.scheme.c_str(), req.scheme.size());
+  return mrb_str_new(mrb, req.scheme.data(), req.scheme.size());
 }
 } // namespace
 
@@ -163,7 +163,7 @@ mrb_value request_set_scheme(mrb_state *mrb, mrb_value self) {
   }
 
   req.scheme =
-      make_string_ref(balloc, StringRef{scheme, static_cast<size_t>(n)});
+    make_string_ref(balloc, StringRef{scheme, static_cast<size_t>(n)});
 
   return self;
 }
@@ -175,7 +175,7 @@ mrb_value request_get_path(mrb_state *mrb, mrb_value self) {
   auto downstream = data->downstream;
   const auto &req = downstream->request();
 
-  return mrb_str_new(mrb, req.path.c_str(), req.path.size());
+  return mrb_str_new(mrb, req.path.data(), req.path.size());
 }
 } // namespace
 
@@ -194,7 +194,7 @@ mrb_value request_set_path(mrb_state *mrb, mrb_value self) {
   mrb_get_args(mrb, "s", &path, &pathlen);
 
   req.path =
-      make_string_ref(balloc, StringRef{path, static_cast<size_t>(pathlen)});
+    make_string_ref(balloc, StringRef{path, static_cast<size_t>(pathlen)});
 
   return self;
 }
@@ -229,13 +229,12 @@ mrb_value request_mod_header(mrb_state *mrb, mrb_value self, bool repl) {
 
   key = mrb_funcall(mrb, key, "downcase", 0);
 
-  auto keyref =
-      make_string_ref(balloc, StringRef{RSTRING_PTR(key),
-                                        static_cast<size_t>(RSTRING_LEN(key))});
+  auto keyref = make_string_ref(
+    balloc, StringRef{RSTRING_PTR(key), static_cast<size_t>(RSTRING_LEN(key))});
 
   mrb_gc_arena_restore(mrb, ai);
 
-  auto token = http2::lookup_token(keyref.byte(), keyref.size());
+  auto token = http2::lookup_token(keyref);
 
   if (repl) {
     size_t p = 0;
@@ -262,19 +261,19 @@ mrb_value request_mod_header(mrb_state *mrb, mrb_value self, bool repl) {
       }
 
       req.fs.add_header_token(
-          keyref,
-          make_string_ref(balloc,
-                          StringRef{RSTRING_PTR(value),
-                                    static_cast<size_t>(RSTRING_LEN(value))}),
-          false, token);
+        keyref,
+        make_string_ref(balloc,
+                        StringRef{RSTRING_PTR(value),
+                                  static_cast<size_t>(RSTRING_LEN(value))}),
+        false, token);
     }
   } else if (mrb_string_p(values)) {
     req.fs.add_header_token(
-        keyref,
-        make_string_ref(balloc,
-                        StringRef{RSTRING_PTR(values),
-                                  static_cast<size_t>(RSTRING_LEN(values))}),
-        false, token);
+      keyref,
+      make_string_ref(balloc,
+                      StringRef{RSTRING_PTR(values),
+                                static_cast<size_t>(RSTRING_LEN(values))}),
+      false, token);
   } else {
     mrb_raise(mrb, E_RUNTIME_ERROR, "value must be string");
   }
@@ -327,7 +326,7 @@ mrb_value request_push(mrb_state *mrb, mrb_value self) {
 
 void init_request_class(mrb_state *mrb, RClass *module) {
   auto request_class =
-      mrb_define_class_under(mrb, module, "Request", mrb->object_class);
+    mrb_define_class_under(mrb, module, "Request", mrb->object_class);
 
   mrb_define_method(mrb, request_class, "initialize", request_init,
                     MRB_ARGS_NONE());

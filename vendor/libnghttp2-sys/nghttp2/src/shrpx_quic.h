@@ -30,8 +30,17 @@
 #include <stdint.h>
 
 #include <functional>
+#include <optional>
+#include <span>
 
-#include <openssl/evp.h>
+#include "ssl_compat.h"
+
+#ifdef NGHTTP2_OPENSSL_IS_WOLFSSL
+#  include <wolfssl/options.h>
+#  include <wolfssl/openssl/evp.h>
+#else // !NGHTTP2_OPENSSL_IS_WOLFSSL
+#  include <openssl/evp.h>
+#endif // !NGHTTP2_OPENSSL_IS_WOLFSSL
 
 #include <ngtcp2/ngtcp2.h>
 
@@ -69,12 +78,12 @@ constexpr size_t SHRPX_QUIC_CID_WORKER_ID_OFFSET = 1;
 constexpr size_t SHRPX_QUIC_SERVER_IDLEN = 4;
 constexpr size_t SHRPX_QUIC_SOCK_IDLEN = 4;
 constexpr size_t SHRPX_QUIC_WORKER_IDLEN =
-    SHRPX_QUIC_SERVER_IDLEN + SHRPX_QUIC_SOCK_IDLEN;
+  SHRPX_QUIC_SERVER_IDLEN + SHRPX_QUIC_SOCK_IDLEN;
 constexpr size_t SHRPX_QUIC_CLIENT_IDLEN = 8;
 constexpr size_t SHRPX_QUIC_DECRYPTED_DCIDLEN =
-    SHRPX_QUIC_WORKER_IDLEN + SHRPX_QUIC_CLIENT_IDLEN;
+  SHRPX_QUIC_WORKER_IDLEN + SHRPX_QUIC_CLIENT_IDLEN;
 constexpr size_t SHRPX_QUIC_SCIDLEN =
-    SHRPX_QUIC_CID_WORKER_ID_OFFSET + SHRPX_QUIC_DECRYPTED_DCIDLEN;
+  SHRPX_QUIC_CID_WORKER_ID_OFFSET + SHRPX_QUIC_DECRYPTED_DCIDLEN;
 constexpr size_t SHRPX_QUIC_CID_ENCRYPTION_KEYLEN = 16;
 constexpr size_t SHRPX_QUIC_CONN_CLOSE_PKTLEN = 256;
 constexpr size_t SHRPX_QUIC_STATELESS_RESET_BURST = 100;
@@ -115,7 +124,7 @@ ngtcp2_tstamp quic_timestamp();
 int quic_send_packet(const UpstreamAddr *faddr, const sockaddr *remote_sa,
                      size_t remote_salen, const sockaddr *local_sa,
                      size_t local_salen, const ngtcp2_pkt_info &pi,
-                     const uint8_t *data, size_t datalen, size_t gso_size);
+                     std::span<const uint8_t> data, size_t gso_size);
 
 int generate_quic_retry_connection_id(ngtcp2_cid &cid, uint32_t server_id,
                                       uint8_t km_id, EVP_CIPHER_CTX *ctx);
@@ -138,27 +147,27 @@ int generate_quic_stateless_reset_token(uint8_t *token, const ngtcp2_cid &cid,
                                         const uint8_t *secret,
                                         size_t secretlen);
 
-int generate_retry_token(uint8_t *token, size_t &tokenlen, uint32_t version,
-                         const sockaddr *sa, socklen_t salen,
-                         const ngtcp2_cid &retry_scid, const ngtcp2_cid &odcid,
-                         const uint8_t *secret, size_t secretlen);
+std::optional<std::span<const uint8_t>>
+generate_retry_token(std::span<uint8_t> token, uint32_t version,
+                     const sockaddr *sa, socklen_t salen,
+                     const ngtcp2_cid &retry_scid, const ngtcp2_cid &odcid,
+                     std::span<const uint8_t> secret);
 
-int verify_retry_token(ngtcp2_cid &odcid, const uint8_t *token, size_t tokenlen,
+int verify_retry_token(ngtcp2_cid &odcid, std::span<const uint8_t> token,
                        uint32_t version, const ngtcp2_cid &dcid,
                        const sockaddr *sa, socklen_t salen,
-                       const uint8_t *secret, size_t secretlen);
+                       std::span<const uint8_t> secret);
 
-int generate_token(uint8_t *token, size_t &tokenlen, const sockaddr *sa,
-                   size_t salen, const uint8_t *secret, size_t secretlen);
+std::optional<std::span<const uint8_t>>
+generate_token(std::span<uint8_t> token, const sockaddr *sa, size_t salen,
+               std::span<const uint8_t> secret, uint8_t km_id);
 
-int verify_token(const uint8_t *token, size_t tokenlen, const sockaddr *sa,
-                 socklen_t salen, const uint8_t *secret, size_t secretlen);
+int verify_token(std::span<const uint8_t> token, const sockaddr *sa,
+                 socklen_t salen, std::span<const uint8_t> secret);
 
-int generate_quic_connection_id_encryption_key(uint8_t *key, size_t keylen,
-                                               const uint8_t *secret,
-                                               size_t secretlen,
-                                               const uint8_t *salt,
-                                               size_t saltlen);
+int generate_quic_connection_id_encryption_key(std::span<uint8_t> key,
+                                               std::span<const uint8_t> secret,
+                                               std::span<const uint8_t> salt);
 
 const QUICKeyingMaterial *
 select_quic_keying_material(const QUICKeyingMaterials &qkms, uint8_t km_id);

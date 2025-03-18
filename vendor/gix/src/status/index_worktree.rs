@@ -182,7 +182,6 @@ pub struct BuiltinSubmoduleStatus {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 mod submodule_status {
     use crate::bstr;
     use crate::bstr::BStr;
@@ -306,7 +305,6 @@ pub struct Iter {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod iter {
     use crate::bstr::{BStr, BString};
     use crate::config::cache::util::ApplyLeniencyDefault;
@@ -539,6 +537,15 @@ pub mod iter {
                 }
             })
         }
+
+        /// The repository-relative path of the entry contained in this item.
+        pub fn rela_path(&self) -> &BStr {
+            match self {
+                Item::Modification { rela_path, .. } => rela_path.as_ref(),
+                Item::DirectoryContents { entry, .. } => entry.rela_path.as_ref(),
+                Item::Rewrite { dirwalk_entry, .. } => dirwalk_entry.rela_path.as_ref(),
+            }
+        }
     }
 
     impl<'index> From<gix_status::index_as_worktree_with_renames::Entry<'index, (), SubmoduleStatus>> for Item {
@@ -603,7 +610,7 @@ pub mod iter {
     }
 
     /// Lifecycle
-    impl<'repo, Progress> Platform<'repo, Progress>
+    impl<Progress> Platform<'_, Progress>
     where
         Progress: gix_features::progress::Progress,
     {
@@ -625,7 +632,7 @@ pub mod iter {
                 .repo
                 .config
                 .resolved
-                .boolean("index", None, "skipHash")
+                .boolean(crate::config::tree::Index::SKIP_HASH)
                 .map(|res| crate::config::tree::Index::SKIP_HASH.enrich_error(res))
                 .transpose()
                 .with_lenient_default(self.repo.config.lenient_config)?

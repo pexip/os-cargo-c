@@ -7,11 +7,23 @@ This library provides the following macros:
  - `cformat!(<FORMAT_STRING> [, ARGS...])`
  - `cprint!(<FORMAT_STRING> [, ARGS...])`
  - `cprintln!(<FORMAT_STRING> [, ARGS...])`
+ - `ceprint!(<FORMAT_STRING> [, ARGS...])`
+ - `ceprintln!(<FORMAT_STRING> [, ARGS...])`
+ - `cwrite!(f, <FORMAT_STRING> [, ARGS...])`
+ - `cwriteln!(f, <FORMAT_STRING> [, ARGS...])`
  - `cstr!(<FORMAT_STRING>)`
  - `untagged!(<FORMAT_STRING>)`
 
-`cformat!()`, `cprint!()`, and `cprintln!()` have the same syntax as `format!()`,
-`print!()` and `println!()` respectively, but they accept an additional syntax inside the
+The macros have the same syntax as their corresponding `std` variants:
+- `cformat!()` as `format!()`
+- `cprint!()` as `print!()`
+- `cprintln!()` as `println!()`
+- `ceprint!()` as `eprint!()`
+- `ceprintln!()` as `eprintln!()`
+- `cwrite!()` as `write!()`
+- `cwriteln!()` as `writeln!()`
+
+But they accept an additional syntax inside the
 format string: HTML-like tags which add ANSI colors/styles at compile-time.
 
 `cstr!()` only transforms the given string literal into another string literal, without
@@ -25,7 +37,7 @@ By default, the provided macros will replace the tags found in the format string
 hexadecimal escape codes. E.g.:
 
 ```rust
-cprintln!("HELLO <green>WORLD</green>")
+cprintln!("HELLO <green>WORLD</green>");
 cprintln!("HELLO <green>WORLD</>"); // Alternative, shorter syntax
 ```
 

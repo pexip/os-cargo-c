@@ -60,6 +60,11 @@ bitflags! {
 }
 
 impl Flags {
+    /// Create a new instance whose stage is set to `stage`.
+    pub fn from_stage(stage: Stage) -> Self {
+        Flags::from_bits((stage as u32) << 12).expect("stage can only be valid flags")
+    }
+
     /// Return the stage as extracted from the bits of this instance.
     pub fn stage(&self) -> Stage {
         match self.stage_raw() {
@@ -96,6 +101,12 @@ impl Flags {
     }
 }
 
+impl From<Stage> for Flags {
+    fn from(value: Stage) -> Self {
+        Flags::from_stage(value)
+    }
+}
+
 pub(crate) mod at_rest {
     use bitflags::bitflags;
 
@@ -115,7 +126,7 @@ pub(crate) mod at_rest {
 
     impl Flags {
         pub fn to_memory(self) -> super::Flags {
-            super::Flags::from_bits_retain(self.bits() as u32)
+            super::Flags::from_bits_retain(u32::from(self.bits()))
         }
     }
 
@@ -135,7 +146,7 @@ pub(crate) mod at_rest {
             )
         }
         pub fn to_flags(self) -> Option<super::Flags> {
-            super::Flags::from_bits((self.bits() as u32) << 16)
+            super::Flags::from_bits(u32::from(self.bits()) << 16)
         }
     }
 

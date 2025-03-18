@@ -195,10 +195,22 @@ impl<F: ErrorFormatter> Error<F> {
     }
 
     /// Insert a piece of context
+    ///
+    /// If this `ContextKind` is already present, its value is replaced and the old value is returned.
     #[inline(never)]
     #[cfg(feature = "error-context")]
     pub fn insert(&mut self, kind: ContextKind, value: ContextValue) -> Option<ContextValue> {
         self.inner.context.insert(kind, value)
+    }
+
+    /// Remove a piece of context, return the old value if any
+    ///
+    /// The context is currently implemented in a vector, so `remove` takes
+    /// linear time.
+    #[inline(never)]
+    #[cfg(feature = "error-context")]
+    pub fn remove(&mut self, kind: ContextKind) -> Option<ContextValue> {
+        self.inner.context.remove(&kind)
     }
 
     /// Should the message be written to `stdout` or not?
@@ -490,11 +502,7 @@ impl<F: ErrorFormatter> Error<F> {
                 let mut styled_suggestion = StyledStr::new();
                 let _ = write!(
                     styled_suggestion,
-                    "to pass '{}{subcmd}{}' as a value, use '{}{name} -- {subcmd}{}'",
-                    invalid.render(),
-                    invalid.render_reset(),
-                    valid.render(),
-                    valid.render_reset()
+                    "to pass '{invalid}{subcmd}{invalid:#}' as a value, use '{valid}{name} -- {subcmd}{valid:#}'",
                 );
                 suggestions.push(styled_suggestion);
             }
@@ -726,11 +734,7 @@ impl<F: ErrorFormatter> Error<F> {
                 let mut styled_suggestion = StyledStr::new();
                 let _ = write!(
                     styled_suggestion,
-                    "to pass '{}{arg}{}' as a value, use '{}-- {arg}{}'",
-                    invalid.render(),
-                    invalid.render_reset(),
-                    valid.render(),
-                    valid.render_reset()
+                    "to pass '{invalid}{arg}{invalid:#}' as a value, use '{valid}-- {arg}{valid:#}'",
                 );
                 suggestions.push(styled_suggestion);
             }
@@ -744,12 +748,7 @@ impl<F: ErrorFormatter> Error<F> {
             match did_you_mean {
                 Some((flag, Some(sub))) => {
                     let mut styled_suggestion = StyledStr::new();
-                    let _ = write!(
-                        styled_suggestion,
-                        "'{}{sub} {flag}{}' exists",
-                        valid.render(),
-                        valid.render_reset()
-                    );
+                    let _ = write!(styled_suggestion, "'{valid}{sub} {flag}{valid:#}' exists",);
                     suggestions.push(styled_suggestion);
                 }
                 Some((flag, None)) => {
@@ -787,11 +786,7 @@ impl<F: ErrorFormatter> Error<F> {
             let mut styled_suggestion = StyledStr::new();
             let _ = write!(
                 styled_suggestion,
-                "subcommand '{}{arg}{}' exists; to use it, remove the '{}--{}' before it",
-                valid.render(),
-                valid.render_reset(),
-                invalid.render(),
-                invalid.render_reset()
+                "subcommand '{valid}{arg}{valid:#}' exists; to use it, remove the '{invalid}--{invalid:#}' before it",
             );
 
             err = err.extend_context_unchecked([

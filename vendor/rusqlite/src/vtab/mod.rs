@@ -3,15 +3,14 @@
 //! Follow these steps to create your own virtual table:
 //! 1. Write implementation of [`VTab`] and [`VTabCursor`] traits.
 //! 2. Create an instance of the [`Module`] structure specialized for [`VTab`]
-//! impl. from step 1.
+//!    impl. from step 1.
 //! 3. Register your [`Module`] structure using [`Connection::create_module`].
 //! 4. Run a `CREATE VIRTUAL TABLE` command that specifies the new module in the
-//! `USING` clause.
+//!    `USING` clause.
 //!
 //! (See [SQLite doc](http://sqlite.org/vtab.html))
 use std::borrow::Cow::{self, Borrowed, Owned};
 use std::marker::PhantomData;
-use std::marker::Sync;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 use std::slice;
@@ -138,7 +137,7 @@ macro_rules! module {
     };
 }
 
-/// Create an modifiable virtual table implementation.
+/// Create a modifiable virtual table implementation.
 ///
 /// Step 2 of [Creating New Virtual Table Implementations](https://sqlite.org/vtab.html#creating_new_virtual_table_implementations).
 #[must_use]
@@ -760,10 +759,9 @@ impl Values<'_> {
             None
         } else {
             Some(unsafe {
-                let rc = array::Array::from_raw(ptr as *const Vec<Value>);
-                let array = rc.clone();
-                array::Array::into_raw(rc); // don't consume it
-                array
+                let ptr = ptr as *const Vec<Value>;
+                array::Array::increment_strong_count(ptr); // don't consume it
+                array::Array::from_raw(ptr)
             })
         }
     }
@@ -924,7 +922,7 @@ pub fn parameter(c_slice: &[u8]) -> Result<(&str, &str)> {
     if let Some(key) = split.next() {
         if let Some(value) = split.next() {
             let param = key.trim();
-            let value = dequote(value);
+            let value = dequote(value.trim());
             return Ok((param, value));
         }
     }
@@ -1082,12 +1080,12 @@ where
     }
 }
 
-unsafe extern "C" fn rust_open<'vtab, T: 'vtab>(
+unsafe extern "C" fn rust_open<'vtab, T>(
     vtab: *mut ffi::sqlite3_vtab,
     pp_cursor: *mut *mut ffi::sqlite3_vtab_cursor,
 ) -> c_int
 where
-    T: VTab<'vtab>,
+    T: VTab<'vtab> + 'vtab,
 {
     let vt = vtab.cast::<T>();
     match (*vt).open() {
@@ -1188,14 +1186,14 @@ where
     }
 }
 
-unsafe extern "C" fn rust_update<'vtab, T: 'vtab>(
+unsafe extern "C" fn rust_update<'vtab, T>(
     vtab: *mut ffi::sqlite3_vtab,
     argc: c_int,
     argv: *mut *mut ffi::sqlite3_value,
     p_rowid: *mut ffi::sqlite3_int64,
 ) -> c_int
 where
-    T: UpdateVTab<'vtab>,
+    T: UpdateVTab<'vtab> + 'vtab,
 {
     assert!(argc >= 1);
     let args = slice::from_raw_parts_mut(argv, argc as usize);

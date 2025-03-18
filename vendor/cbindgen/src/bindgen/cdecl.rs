@@ -7,6 +7,7 @@ use std::io::Write;
 use crate::bindgen::config::Layout;
 use crate::bindgen::declarationtyperesolver::DeclarationType;
 use crate::bindgen::ir::{ConstExpr, Function, GenericArgument, Type};
+use crate::bindgen::language_backend::LanguageBackend;
 use crate::bindgen::writer::{ListType, SourceWriter};
 use crate::bindgen::{Config, Language};
 
@@ -101,7 +102,7 @@ impl CDecl {
             layout,
             never_return: f.never_return,
         });
-        self.deprecated = f.annotations.deprecated.clone();
+        self.deprecated.clone_from(&f.annotations.deprecated);
         self.build_type(&f.ret, false, config);
     }
 
@@ -114,7 +115,7 @@ impl CDecl {
                         "error generating cdecl for {:?}",
                         t
                     );
-                    self.type_qualifers = "const".to_owned();
+                    "const".clone_into(&mut self.type_qualifers);
                 }
 
                 assert!(
@@ -122,13 +123,13 @@ impl CDecl {
                     "error generating cdecl for {:?}",
                     t
                 );
-                self.type_name = generic.export_name().to_owned();
+                generic.export_name().clone_into(&mut self.type_name);
                 assert!(
                     self.type_generic_args.is_empty(),
                     "error generating cdecl for {:?}",
                     t
                 );
-                self.type_generic_args = generic.generics().to_owned();
+                generic.generics().clone_into(&mut self.type_generic_args);
                 self.type_ctype = generic.ctype().cloned();
             }
             Type::Primitive(ref p) => {
@@ -138,7 +139,7 @@ impl CDecl {
                         "error generating cdecl for {:?}",
                         t
                     );
-                    self.type_qualifers = "const".to_owned();
+                    "const".clone_into(&mut self.type_qualifers);
                 }
 
                 assert!(
@@ -183,7 +184,7 @@ impl CDecl {
                 });
                 self.declarators.push(CDeclarator::Func {
                     args,
-                    layout: config.function.args.clone(),
+                    layout: config.function.args,
                     never_return: *never_return,
                 });
                 self.build_type(ret, false, config);
@@ -191,7 +192,13 @@ impl CDecl {
         }
     }
 
-    fn write<F: Write>(&self, out: &mut SourceWriter<F>, ident: Option<&str>, config: &Config) {
+    fn write<F: Write, LB: LanguageBackend>(
+        &self,
+        language_backend: &mut LB,
+        out: &mut SourceWriter<F>,
+        ident: Option<&str>,
+        config: &Config,
+    ) {
         // Write the type-specifier and type-qualifier first
         if !self.type_qualifers.is_empty() {
             write!(out, "{} ", self.type_qualifers);
@@ -207,7 +214,15 @@ impl CDecl {
 
         if !self.type_generic_args.is_empty() {
             out.write("<");
-            out.write_horizontal_source_list(&self.type_generic_args, ListType::Join(", "));
+            out.write_horizontal_source_list(
+                language_backend,
+                &self.type_generic_args,
+                ListType::Join(", "),
+                |language_backend, out, g| match *g {
+                    GenericArgument::Type(ref ty) => language_backend.write_type(out, ty),
+                    GenericArgument::Const(ref expr) => write!(out, "{}", expr.as_str()),
+                },
+            );
             out.write(">");
         }
 
@@ -221,8 +236,7 @@ impl CDecl {
 
         #[allow(clippy::while_let_on_iterator)]
         while let Some(declarator) = iter_rev.next() {
-            let next_is_pointer = iter_rev.peek().map_or(false, |x| x.is_ptr());
-
+            let next_is_pointer = iter_rev.peek().is_some_and(|x| x.is_ptr());
             match *declarator {
                 CDeclarator::Ptr {
                     is_const,
@@ -289,7 +303,8 @@ impl CDecl {
                         out.write("void");
                     }
 
-                    fn write_vertical<F: Write>(
+                    fn write_vertical<F: Write, LB: LanguageBackend>(
+                        language_backend: &mut LB,
                         out: &mut SourceWriter<F>,
                         config: &Config,
                         args: &[(Option<String>, CDecl)],
@@ -305,12 +320,13 @@ impl CDecl {
                             // Convert &Option<String> to Option<&str>
                             let arg_ident = arg_ident.as_ref().map(|x| x.as_ref());
 
-                            arg_ty.write(out, arg_ident, config);
+                            arg_ty.write(language_backend, out, arg_ident, config);
                         }
                         out.pop_tab();
                     }
 
-                    fn write_horizontal<F: Write>(
+                    fn write_horizontal<F: Write, LB: LanguageBackend>(
+                        language_backend: &mut LB,
                         out: &mut SourceWriter<F>,
                         config: &Config,
                         args: &[(Option<String>, CDecl)],
@@ -323,19 +339,19 @@ impl CDecl {
                             // Convert &Option<String> to Option<&str>
                             let arg_ident = arg_ident.as_ref().map(|x| x.as_ref());
 
-                            arg_ty.write(out, arg_ident, config);
+                            arg_ty.write(language_backend, out, arg_ident, config);
                         }
                     }
 
                     match layout {
-                        Layout::Vertical => write_vertical(out, config, args),
-                        Layout::Horizontal => write_horizontal(out, config, args),
+                        Layout::Vertical => write_vertical(language_backend, out, config, args),
+                        Layout::Horizontal => write_horizontal(language_backend, out, config, args),
                         Layout::Auto => {
                             if !out.try_write(
-                                |out| write_horizontal(out, config, args),
+                                |out| write_horizontal(language_backend, out, config, args),
                                 config.line_length,
                             ) {
-                                write_vertical(out, config, args)
+                                write_vertical(language_backend, out, config, args)
                             }
                         }
                     }
@@ -354,19 +370,31 @@ impl CDecl {
     }
 }
 
-pub fn write_func<F: Write>(
+pub fn write_func<F: Write, LB: LanguageBackend>(
+    language_backend: &mut LB,
     out: &mut SourceWriter<F>,
     f: &Function,
     layout: Layout,
     config: &Config,
 ) {
-    CDecl::from_func(f, layout, config).write(out, Some(f.path().name()), config);
+    CDecl::from_func(f, layout, config).write(language_backend, out, Some(f.path().name()), config);
 }
 
-pub fn write_field<F: Write>(out: &mut SourceWriter<F>, t: &Type, ident: &str, config: &Config) {
-    CDecl::from_type(t, config).write(out, Some(ident), config);
+pub fn write_field<F: Write, LB: LanguageBackend>(
+    language_backend: &mut LB,
+    out: &mut SourceWriter<F>,
+    t: &Type,
+    ident: &str,
+    config: &Config,
+) {
+    CDecl::from_type(t, config).write(language_backend, out, Some(ident), config);
 }
 
-pub fn write_type<F: Write>(out: &mut SourceWriter<F>, t: &Type, config: &Config) {
-    CDecl::from_type(t, config).write(out, None, config);
+pub fn write_type<F: Write, LB: LanguageBackend>(
+    language_backend: &mut LB,
+    out: &mut SourceWriter<F>,
+    t: &Type,
+    config: &Config,
+) {
+    CDecl::from_type(t, config).write(language_backend, out, None, config);
 }

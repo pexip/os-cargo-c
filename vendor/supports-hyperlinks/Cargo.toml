@@ -13,11 +13,19 @@
 edition = "2021"
 rust-version = "1.70.0"
 name = "supports-hyperlinks"
-version = "3.0.0"
+version = "3.1.0"
 authors = ["Kat Marchán <kzm@zkat.tech>"]
+build = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Detects whether a terminal supports rendering hyperlinks."
 documentation = "https://docs.rs/supports-hyperlinks"
 readme = "README.md"
-categories = ["terminal"]
 license = "Apache-2.0"
 repository = "https://github.com/zkat/supports-hyperlinks"
+
+[lib]
+name = "supports_hyperlinks"
+path = "src/lib.rs"

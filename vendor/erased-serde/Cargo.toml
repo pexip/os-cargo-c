@@ -13,10 +13,11 @@
 edition = "2021"
 rust-version = "1.61"
 name = "erased-serde"
-version = "0.4.5"
+version = "0.4.6"
 authors = ["David Tolnay <dtolnay@gmail.com>"]
 build = false
 exclude = ["benches"]
+autolib = false
 autobins = false
 autoexamples = false
 autotests = false
@@ -37,13 +38,30 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/dtolnay/erased-serde"
 
 [package.metadata.docs.rs]
-rustdoc-args = ["--generate-link-to-definition"]
+rustdoc-args = [
+    "--generate-link-to-definition",
+    "--extern-html-root-url=core=https://doc.rust-lang.org",
+    "--extern-html-root-url=alloc=https://doc.rust-lang.org",
+    "--extern-html-root-url=std=https://doc.rust-lang.org",
+]
 targets = ["x86_64-unknown-linux-gnu"]
+
+[features]
+alloc = ["serde/alloc"]
+default = ["std"]
+std = [
+    "alloc",
+    "serde/std",
+]
+unstable-debug = []
 
 [lib]
 name = "erased_serde"
 path = "src/lib.rs"
-doc-scrape-examples = false
+
+[[test]]
+name = "compiletest"
+path = "tests/compiletest.rs"
 
 [[test]]
 name = "test"
@@ -52,10 +70,6 @@ path = "tests/readme.rs"
 [[test]]
 name = "traitobject"
 path = "tests/traitobject.rs"
-
-[[test]]
-name = "compiletest"
-path = "tests/compiletest.rs"
 
 [dependencies.serde]
 version = "1.0.194"
@@ -79,12 +93,3 @@ version = "1.0.99"
 [dev-dependencies.trybuild]
 version = "1.0.83"
 features = ["diff"]
-
-[features]
-alloc = ["serde/alloc"]
-default = ["std"]
-std = [
-    "alloc",
-    "serde/std",
-]
-unstable-debug = []

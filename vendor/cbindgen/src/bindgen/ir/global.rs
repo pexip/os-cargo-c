@@ -2,15 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use std::io::Write;
-
-use crate::bindgen::cdecl;
 use crate::bindgen::config::Config;
 use crate::bindgen::declarationtyperesolver::DeclarationTypeResolver;
 use crate::bindgen::dependencies::Dependencies;
-use crate::bindgen::ir::{AnnotationSet, Cfg, Documentation, Item, ItemContainer, Path, Type};
+use crate::bindgen::ir::{
+    AnnotationSet, Cfg, Documentation, GenericParams, Item, ItemContainer, Path, Type,
+};
 use crate::bindgen::library::Library;
-use crate::bindgen::writer::{Source, SourceWriter};
 
 #[derive(Debug, Clone)]
 pub struct Static {
@@ -38,7 +36,7 @@ impl Static {
         Ok(Static::new(
             path,
             ty.unwrap(),
-            item.mutability.is_some(),
+            matches!(item.mutability, syn::StaticMutability::Mut(_)),
             Cfg::append(mod_cfg, Cfg::load(&item.attrs)),
             AnnotationSet::load(&item.attrs)?,
             Documentation::load(&item.attrs),
@@ -91,6 +89,10 @@ impl Item for Static {
         &mut self.annotations
     }
 
+    fn documentation(&self) -> &Documentation {
+        &self.documentation
+    }
+
     fn container(&self) -> ItemContainer {
         ItemContainer::Static(self.clone())
     }
@@ -103,19 +105,11 @@ impl Item for Static {
         self.ty.resolve_declaration_types(resolver);
     }
 
+    fn generic_params(&self) -> &GenericParams {
+        GenericParams::empty()
+    }
+
     fn add_dependencies(&self, library: &Library, out: &mut Dependencies) {
         self.ty.add_dependencies(library, out);
-    }
-}
-
-impl Source for Static {
-    fn write<F: Write>(&self, config: &Config, out: &mut SourceWriter<F>) {
-        out.write("extern ");
-        if let Type::Ptr { is_const: true, .. } = self.ty {
-        } else if !self.mutable {
-            out.write("const ");
-        }
-        cdecl::write_field(out, &self.ty, &self.export_name, config);
-        out.write(";");
     }
 }

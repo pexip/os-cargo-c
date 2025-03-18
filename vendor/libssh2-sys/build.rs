@@ -66,9 +66,12 @@ fn main() {
     cfg.file("libssh2/src/agent.c")
         .file("libssh2/src/bcrypt_pbkdf.c")
         .file("libssh2/src/blowfish.c")
+        .file("libssh2/src/chacha.c")
         .file("libssh2/src/channel.c")
+        .file("libssh2/src/cipher-chachapoly.c")
         .file("libssh2/src/comp.c")
         .file("libssh2/src/crypt.c")
+        .file("libssh2/src/crypto.c")
         .file("libssh2/src/global.c")
         .file("libssh2/src/hostkey.c")
         .file("libssh2/src/keepalive.c")
@@ -78,6 +81,7 @@ fn main() {
         .file("libssh2/src/misc.c")
         .file("libssh2/src/packet.c")
         .file("libssh2/src/pem.c")
+        .file("libssh2/src/poly1305.c")
         .file("libssh2/src/publickey.c")
         .file("libssh2/src/scp.c")
         .file("libssh2/src/session.c")
@@ -98,12 +102,15 @@ fn main() {
         if env::var_os("CARGO_FEATURE_OPENSSL_ON_WIN32").is_some() {
             cfg.define("LIBSSH2_OPENSSL", None);
             cfg.define("HAVE_EVP_AES_128_CTR", None);
-            cfg.file("libssh2/src/openssl.c");
-            println!("cargo:rustc-link-lib=static=libssl");
-            println!("cargo:rustc-link-lib=static=libcrypto");
+            let lib_prefix = if target.contains("windows-msvc") {
+                "lib"
+            } else {
+                ""
+            };
+            println!("cargo:rustc-link-lib=static={lib_prefix}ssl");
+            println!("cargo:rustc-link-lib=static={lib_prefix}crypto");
         } else {
             cfg.define("LIBSSH2_WINCNG", None);
-            cfg.file("libssh2/src/wincng.c");
         }
     } else {
         cfg.flag("-fvisibility=hidden");
@@ -122,8 +129,6 @@ fn main() {
         cfg.define("HAVE_EVP_AES_128_CTR", None);
         cfg.define("HAVE_POLL", None);
         cfg.define("HAVE_GETTIMEOFDAY", None);
-
-        cfg.file("libssh2/src/openssl.c");
 
         // Create `libssh2_config.h`
         let config = fs::read_to_string("libssh2/src/libssh2_config_cmake.h.in").unwrap();

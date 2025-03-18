@@ -33,7 +33,6 @@
 #include <vector>
 #include <chrono>
 
-#include "shrpx_config.h"
 #include "shrpx_log_config.h"
 #include "tls.h"
 #include "template.h"
@@ -97,6 +96,7 @@ namespace shrpx {
 
 class Downstream;
 struct DownstreamAddr;
+struct LoggingConfig;
 
 enum SeverityLevel { INFO, NOTICE, WARN, ERROR, FATAL };
 
@@ -266,8 +266,8 @@ enum class LogFragmentType {
 };
 
 struct LogFragment {
-  LogFragment(LogFragmentType type, StringRef value = StringRef::from_lit(""))
-      : type(type), value(std::move(value)) {}
+  LogFragment(LogFragmentType type, StringRef value = ""_sr)
+    : type(type), value(std::move(value)) {}
   LogFragmentType type;
   StringRef value;
 };

@@ -27,7 +27,7 @@ for a Rust API for reading the metadata.
 
 Within the same output format version, the compatibility is maintained, except
 some scenarios. The following is a non-exhaustive list of changes that are not
-considersed as incompatible:
+considered as incompatible:
 
 * **Adding new fields** — New fields will be added when needed. Reserving this
   helps Cargo evolve without bumping the format version too often.
@@ -123,7 +123,12 @@ The JSON output has the following format:
                        If not specified or null, the dependency is from the default
                        registry (crates.io).
                     */
-                    "registry": null
+                    "registry": null,
+                    /* (unstable) Boolean flag of whether or not this is a pulbic
+                       dependency. This field is only present when
+                       `-Zpublic-dependency` is enabled.
+                    */
+                    "public": false
                 }
             ],
             /* Array of Cargo targets. */
@@ -151,7 +156,9 @@ The JSON output has the following format:
                     "crate_types": [
                         "bin"
                     ],
-                    /* The name of the target. */
+                    /* The name of the target.
+                       For lib targets, dashes will be replaced with underscores.
+                    */
                     "name": "my-package",
                     /* Absolute path to the root source file of the target. */
                     "src_path": "/path/to/my-package/src/main.rs",
@@ -376,6 +383,8 @@ reproduction of the information within `Cargo.toml`.
 {{> options-manifest-path }}
 
 {{> options-locked }}
+
+{{> options-lockfile-path }}
 {{/options}}
 
 {{> section-options-common }}

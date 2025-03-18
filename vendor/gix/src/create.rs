@@ -6,7 +6,6 @@ use std::{
 
 use gix_config::parse::section;
 use gix_discover::DOT_GIT_DIR;
-use gix_macros::momo;
 
 /// The error used in [`into()`].
 #[derive(Debug, thiserror::Error)]
@@ -54,14 +53,14 @@ struct PathCursor<'a>(&'a mut PathBuf);
 
 struct NewDir<'a>(&'a mut PathBuf);
 
-impl<'a> PathCursor<'a> {
+impl PathCursor<'_> {
     fn at(&mut self, component: &str) -> &Path {
         self.0.push(component);
         self.0.as_path()
     }
 }
 
-impl<'a> NewDir<'a> {
+impl NewDir<'_> {
     fn at(self, component: &str) -> Result<Self, Error> {
         self.0.push(component);
         create_dir(self.0)?;
@@ -72,13 +71,13 @@ impl<'a> NewDir<'a> {
     }
 }
 
-impl<'a> Drop for NewDir<'a> {
+impl Drop for NewDir<'_> {
     fn drop(&mut self) {
         self.0.pop();
     }
 }
 
-impl<'a> Drop for PathCursor<'a> {
+impl Drop for PathCursor<'_> {
     fn drop(&mut self) {
         self.0.pop();
     }
@@ -125,7 +124,6 @@ pub struct Options {
 /// Note that this is a simple template-based initialization routine which should be accompanied with additional corrections
 /// to respect git configuration, which is accomplished by [its callers][crate::ThreadSafeRepository::init_opts()]
 /// that return a [Repository][crate::Repository].
-#[momo]
 pub fn into(
     directory: impl Into<PathBuf>,
     kind: Kind,
@@ -241,8 +239,8 @@ pub fn into(
     .expect("by now the `dot_git` dir is valid as we have accessed it"))
 }
 
-fn key(name: &'static str) -> section::Key<'static> {
-    section::Key::try_from(name).expect("valid key name")
+fn key(name: &'static str) -> section::ValueName<'static> {
+    section::ValueName::try_from(name).expect("valid key name")
 }
 
 fn bool(v: bool) -> &'static str {

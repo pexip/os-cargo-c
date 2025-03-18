@@ -194,7 +194,7 @@ mod expand {
                                     for token in commit_iter {
                                         match token {
                                             Ok(gix_object::commit::ref_iter::Token::Parent { id }) => {
-                                                parent_commit_ids.push(id)
+                                                parent_commit_ids.push(id);
                                             }
                                             Ok(_) => break,
                                             Err(err) => return Err(Error::CommitDecode(err)),
@@ -247,14 +247,14 @@ mod expand {
 
                                         changes_delegate.clear();
                                         let objects = CountingObjects::new(db);
-                                        gix_diff::tree::Changes::from(Some(parent_tree))
-                                            .needed_to_obtain(
-                                                current_tree_iter,
-                                                &mut tree_diff_state,
-                                                &objects,
-                                                &mut changes_delegate,
-                                            )
-                                            .map_err(Error::TreeChanges)?;
+                                        gix_diff::tree(
+                                            parent_tree,
+                                            current_tree_iter,
+                                            &mut tree_diff_state,
+                                            &objects,
+                                            &mut changes_delegate,
+                                        )
+                                        .map_err(Error::TreeChanges)?;
                                         stats.decoded_objects += objects.into_count();
                                     }
                                     &changes_delegate.objects

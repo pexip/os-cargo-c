@@ -11,16 +11,27 @@
 
 [package]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.83"
 name = "cargo-util"
-version = "0.2.12"
+version = "0.2.18"
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Miscellaneous support code used by Cargo."
 homepage = "https://github.com/rust-lang/cargo"
+readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rust-lang/cargo"
 
+[lib]
+name = "cargo_util"
+path = "src/lib.rs"
+
 [dependencies.anyhow]
-version = "1.0.81"
+version = "1.0.86"
 
 [dependencies.filetime]
 version = "0.2.23"
@@ -32,7 +43,7 @@ version = "0.4.3"
 version = "0.4.22"
 
 [dependencies.jobserver]
-version = "0.1.28"
+version = "0.1.32"
 
 [dependencies.same-file]
 version = "1.0.6"
@@ -48,22 +59,24 @@ version = "3.10.1"
 
 [dependencies.tracing]
 version = "0.1.40"
+features = ["std"]
+default-features = false
 
 [dependencies.walkdir]
 version = "2.5.0"
 
-[target."cfg(target_os = \"macos\")".dependencies.core-foundation]
-version = "0.9.4"
+[target.'cfg(target_os = "macos")'.dependencies.core-foundation]
+version = "0.10.0"
 features = ["mac_os_10_7_support"]
 
 [target."cfg(unix)".dependencies.libc]
-version = "0.2.153"
+version = "0.2.155"
 
 [target."cfg(windows)".dependencies.miow]
 version = "0.6.0"
 
 [target."cfg(windows)".dependencies.windows-sys]
-version = "0.52"
+version = "0.59"
 features = [
     "Win32_Storage_FileSystem",
     "Win32_Foundation",
@@ -79,6 +92,10 @@ self_named_module_files = "warn"
 
 [lints.clippy.all]
 level = "allow"
+priority = -2
+
+[lints.clippy.correctness]
+level = "warn"
 priority = -1
 
 [lints.rust]

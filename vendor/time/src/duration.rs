@@ -5,6 +5,8 @@ use core::fmt;
 use core::iter::Sum;
 use core::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 use core::time::Duration as StdDuration;
+#[cfg(feature = "std")]
+use std::time::SystemTime;
 
 use deranged::RangedI32;
 use num_conv::prelude::*;
@@ -44,7 +46,6 @@ pub struct Duration {
     /// Number of nanoseconds within the second. The sign always matches the `seconds` field.
     // Sign must match that of `seconds` (though this is not a safety requirement).
     nanoseconds: Nanoseconds,
-    #[allow(clippy::missing_docs_in_private_items)]
     padding: Padding,
 }
 
@@ -189,7 +190,6 @@ macro_rules! try_from_secs {
 }
 
 impl Duration {
-    // region: constants
     /// Equivalent to `0.seconds()`.
     ///
     /// ```rust
@@ -267,9 +267,7 @@ impl Duration {
 
     /// The maximum possible duration. Adding any positive duration to this will cause an overflow.
     pub const MAX: Self = Self::new_ranged(i64::MAX, Nanoseconds::MAX);
-    // endregion constants
 
-    // region: is_{sign}
     /// Check if a duration is exactly zero.
     ///
     /// ```rust
@@ -304,9 +302,7 @@ impl Duration {
     pub const fn is_positive(self) -> bool {
         self.seconds > 0 || self.nanoseconds.get() > 0
     }
-    // endregion is_{sign}
 
-    // region: abs
     /// Get the absolute value of the duration.
     ///
     /// This method saturates the returned value if it would otherwise overflow.
@@ -339,9 +335,7 @@ impl Duration {
             self.nanoseconds.get().unsigned_abs(),
         )
     }
-    // endregion abs
 
-    // region: constructors
     /// Create a new `Duration` without checking the validity of the components.
     ///
     /// # Safety
@@ -517,7 +511,7 @@ impl Duration {
     /// ```rust
     /// # use time::{Duration, ext::NumericalDuration};
     /// assert_eq!(Duration::seconds_f64(0.5), 0.5.seconds());
-    /// assert_eq!(Duration::seconds_f64(-0.5), -0.5.seconds());
+    /// assert_eq!(Duration::seconds_f64(-0.5), (-0.5).seconds());
     /// ```
     pub fn seconds_f64(seconds: f64) -> Self {
         try_from_secs!(
@@ -564,7 +558,7 @@ impl Duration {
     /// ```rust
     /// # use time::{Duration, ext::NumericalDuration};
     /// assert_eq!(Duration::saturating_seconds_f64(0.5), 0.5.seconds());
-    /// assert_eq!(Duration::saturating_seconds_f64(-0.5), -0.5.seconds());
+    /// assert_eq!(Duration::saturating_seconds_f64(-0.5), (-0.5).seconds());
     /// assert_eq!(
     ///     Duration::saturating_seconds_f64(f64::NAN),
     ///     Duration::new(0, 0),
@@ -637,7 +631,7 @@ impl Duration {
     /// ```rust
     /// # use time::{Duration, ext::NumericalDuration};
     /// assert_eq!(Duration::checked_seconds_f64(0.5), Some(0.5.seconds()));
-    /// assert_eq!(Duration::checked_seconds_f64(-0.5), Some(-0.5.seconds()));
+    /// assert_eq!(Duration::checked_seconds_f64(-0.5), Some((-0.5).seconds()));
     /// assert_eq!(Duration::checked_seconds_f64(f64::NAN), None);
     /// assert_eq!(Duration::checked_seconds_f64(f64::NEG_INFINITY), None);
     /// assert_eq!(Duration::checked_seconds_f64(f64::INFINITY), None);
@@ -664,7 +658,7 @@ impl Duration {
     /// ```rust
     /// # use time::{Duration, ext::NumericalDuration};
     /// assert_eq!(Duration::checked_seconds_f32(0.5), Some(0.5.seconds()));
-    /// assert_eq!(Duration::checked_seconds_f32(-0.5), Some(-0.5.seconds()));
+    /// assert_eq!(Duration::checked_seconds_f32(-0.5), Some((-0.5).seconds()));
     /// assert_eq!(Duration::checked_seconds_f32(f32::NAN), None);
     /// assert_eq!(Duration::checked_seconds_f32(f32::NEG_INFINITY), None);
     /// assert_eq!(Duration::checked_seconds_f32(f32::INFINITY), None);
@@ -752,9 +746,7 @@ impl Duration {
         // Safety: `nanoseconds` is guaranteed to be in range because of the modulus above.
         unsafe { Self::new_unchecked(seconds as _, nanoseconds as _) }
     }
-    // endregion constructors
 
-    // region: getters
     /// Get the number of whole weeks in the duration.
     ///
     /// ```rust
@@ -928,9 +920,7 @@ impl Duration {
     pub(crate) const fn subsec_nanoseconds_ranged(self) -> Nanoseconds {
         self.nanoseconds
     }
-    // endregion getters
 
-    // region: checked arithmetic
     /// Computes `self + rhs`, returning `None` if an overflow occurred.
     ///
     /// ```rust
@@ -1043,9 +1033,7 @@ impl Duration {
             ))
         }
     }
-    // endregion checked arithmetic
 
-    // region: saturating arithmetic
     /// Computes `self + rhs`, saturating if an overflow occurred.
     ///
     /// ```rust
@@ -1163,10 +1151,10 @@ impl Duration {
         // Safety: `nanoseconds` is guaranteed to be in range because of to the modulus above.
         unsafe { Self::new_unchecked(seconds, nanoseconds) }
     }
-    // endregion saturating arithmetic
 
     /// Runs a closure, returning the duration of time it took to run. The return value of the
     /// closure is provided in the second part of the tuple.
+    #[doc(hidden)]
     #[cfg(feature = "std")]
     #[deprecated(
         since = "0.3.32",
@@ -1182,7 +1170,6 @@ impl Duration {
     }
 }
 
-// region: trait impls
 /// The format returned by this implementation is not stable and must not be relied upon.
 ///
 /// By default this produces an exact, full-precision printout of the duration.
@@ -1573,4 +1560,39 @@ impl<'a> Sum<&'a Self> for Duration {
         iter.copied().sum()
     }
 }
-// endregion trait impls
+
+#[cfg(feature = "std")]
+impl Add<Duration> for SystemTime {
+    type Output = Self;
+
+    fn add(self, duration: Duration) -> Self::Output {
+        if duration.is_zero() {
+            self
+        } else if duration.is_positive() {
+            self + duration.unsigned_abs()
+        } else {
+            debug_assert!(duration.is_negative());
+            self - duration.unsigned_abs()
+        }
+    }
+}
+
+impl_add_assign!(SystemTime: #[cfg(feature = "std")] Duration);
+
+#[cfg(feature = "std")]
+impl Sub<Duration> for SystemTime {
+    type Output = Self;
+
+    fn sub(self, duration: Duration) -> Self::Output {
+        if duration.is_zero() {
+            self
+        } else if duration.is_positive() {
+            self - duration.unsigned_abs()
+        } else {
+            debug_assert!(duration.is_negative());
+            self + duration.unsigned_abs()
+        }
+    }
+}
+
+impl_sub_assign!(SystemTime: #[cfg(feature = "std")] Duration);

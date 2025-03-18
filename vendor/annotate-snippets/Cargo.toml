@@ -11,11 +11,21 @@
 
 [package]
 edition = "2021"
-rust-version = "1.65"
+rust-version = "1.66.0"
 name = "annotate-snippets"
-version = "0.11.4"
-authors = ["Zibi Braniecki <gandalf@mozilla.com>"]
+version = "0.11.5"
 build = false
+include = [
+    "build.rs",
+    "src/**/*",
+    "Cargo.toml",
+    "Cargo.lock",
+    "LICENSE*",
+    "README.md",
+    "benches/**/*",
+    "examples/**/*",
+]
+autolib = false
 autobins = false
 autoexamples = false
 autotests = false
@@ -29,8 +39,17 @@ keywords = [
     "errors",
     "debug",
 ]
-license = "Apache-2.0/MIT"
+categories = []
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/rust-lang/annotate-snippets-rs"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = [
+    "--cfg",
+    "docsrs",
+    "--generate-link-to-definition",
+]
 
 [package.metadata.release]
 tag-name = "{{version}}"
@@ -90,38 +109,29 @@ path = "examples/format.rs"
 name = "multislice"
 path = "examples/multislice.rs"
 
-[[test]]
-name = "examples"
-path = "tests/examples.rs"
-
-[[test]]
-name = "fixtures"
-path = "tests/fixtures/main.rs"
-harness = false
-
-[[test]]
-name = "formatter"
-path = "tests/formatter.rs"
-
 [[bench]]
-name = "simple"
-path = "benches/simple.rs"
+name = "bench"
+path = "benches/bench.rs"
 harness = false
 
 [dependencies.anstyle]
 version = "1.0.4"
 
+[dependencies.memchr]
+version = "2.7.4"
+optional = true
+
 [dependencies.unicode-width]
-version = "0.1.11"
+version = "0.2.0"
 
 [dev-dependencies.anstream]
 version = "0.6.13"
 
-[dev-dependencies.criterion]
-version = "0.5.1"
-
 [dev-dependencies.difference]
 version = "2.0.0"
+
+[dev-dependencies.divan]
+version = "0.1.14"
 
 [dev-dependencies.glob]
 version = "0.3.1"
@@ -140,13 +150,14 @@ features = [
 ]
 
 [dev-dependencies.toml]
-version = "0.5.11"
+version = "0.8.0"
 
 [dev-dependencies.tryfn]
 version = "0.2.1"
 
 [features]
 default = []
+simd = ["memchr"]
 testing-colors = []
 
 [badges.maintenance]
@@ -197,6 +208,7 @@ rc_mutex = "warn"
 redundant_feature_names = "warn"
 ref_option_ref = "warn"
 rest_pat_in_fully_bound_structs = "warn"
+result_large_err = "allow"
 same_functions_in_if_condition = "warn"
 self_named_module_files = "warn"
 semicolon_if_nothing_returned = "warn"
@@ -207,6 +219,7 @@ string_lit_as_bytes = "warn"
 string_to_string = "warn"
 todo = "warn"
 trait_duplication_in_bounds = "warn"
+uninlined_format_args = "warn"
 verbose_file_reads = "warn"
 wildcard_imports = "warn"
 zero_sized_map_values = "warn"

@@ -5,6 +5,14 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=curl");
+    println!(
+        "cargo:rustc-check-cfg=cfg(\
+            libcurl_vendored,\
+            link_libnghttp2,\
+            link_libz,\
+            link_openssl,\
+        )"
+    );
     let target = env::var("TARGET").unwrap();
     let windows = target.contains("windows");
 
@@ -100,7 +108,7 @@ fn main() {
             .replace("@LIBCURL_LIBS@", "")
             .replace("@SUPPORT_FEATURES@", "")
             .replace("@SUPPORT_PROTOCOLS@", "")
-            .replace("@CURLVERSION@", "8.8.0"),
+            .replace("@CURLVERSION@", "8.12.1"),
     )
     .unwrap();
 
@@ -122,8 +130,9 @@ fn main() {
         .define("CURL_DISABLE_TFTP", None)
         .define("CURL_STATICLIB", None)
         .define("ENABLE_IPV6", None)
+        .define("HAVE_SOCKADDR_IN6_SIN6_SCOPE_ID", None)
         .define("HAVE_ASSERT_H", None)
-        .define("OS", "\"unknown\"") // TODO
+        .define("CURL_OS", "\"unknown\"") // TODO
         .define("HAVE_ZLIB_H", None)
         .define("HAVE_LONGLONG", None)
         .define("HAVE_LIBZ", None)
@@ -207,6 +216,7 @@ fn main() {
         .file("curl/lib/strcase.c")
         .file("curl/lib/strdup.c")
         .file("curl/lib/strerror.c")
+        .file("curl/lib/strparse.c")
         .file("curl/lib/strtok.c")
         .file("curl/lib/strtoofft.c")
         .file("curl/lib/timeval.c")
@@ -225,8 +235,10 @@ fn main() {
         .file("curl/lib/vtls/hostcheck.c")
         .file("curl/lib/vtls/keylog.c")
         .file("curl/lib/vtls/vtls.c")
+        .file("curl/lib/vtls/vtls_scache.c")
         .file("curl/lib/warnless.c")
         .file("curl/lib/timediff.c")
+        .file("curl/lib/ws.c")
         .define("HAVE_GETADDRINFO", None)
         .define("HAVE_GETPEERNAME", None)
         .define("HAVE_GETSOCKNAME", None)
@@ -282,6 +294,7 @@ fn main() {
     // features, make sure we only compile one vtls.
     if cfg!(feature = "rustls") {
         cfg.define("USE_RUSTLS", None)
+            .file("curl/lib/vtls/cipher_suite.c")
             .file("curl/lib/vtls/rustls.c")
             .include(env::var_os("DEP_RUSTLS_FFI_INCLUDE").unwrap());
     } else if cfg!(feature = "windows-static-ssl") {
@@ -320,6 +333,7 @@ fn main() {
                 .file("curl/lib/vtls/x509asn1.c");
         } else if target.contains("-apple-") {
             cfg.define("USE_SECTRANSP", None)
+                .file("curl/lib/vtls/cipher_suite.c")
                 .file("curl/lib/vtls/sectransp.c")
                 .file("curl/lib/vtls/x509asn1.c");
             if xcode_major_version().map_or(true, |v| v >= 9) {

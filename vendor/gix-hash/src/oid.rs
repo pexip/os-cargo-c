@@ -30,7 +30,7 @@ pub struct oid {
 #[allow(clippy::derived_hash_with_manual_eq)]
 impl hash::Hash for oid {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        state.write(self.as_bytes())
+        state.write(self.as_bytes());
     }
 }
 
@@ -41,7 +41,7 @@ pub struct HexDisplay<'a> {
     hex_len: usize,
 }
 
-impl<'a> std::fmt::Display for HexDisplay<'a> {
+impl std::fmt::Display for HexDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut hex = Kind::hex_buf();
         let max_len = self.inner.hex_to_buf(hex.as_mut());

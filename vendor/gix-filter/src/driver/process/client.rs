@@ -8,7 +8,6 @@ use crate::driver::{
 };
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod handshake {
     /// The error returned by [Client::handshake()][super::Client::handshake()].
     #[derive(Debug, thiserror::Error)]
@@ -24,7 +23,6 @@ pub mod handshake {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod invoke {
     /// The error returned by [Client::invoke()][super::Client::invoke()].
     #[derive(Debug, thiserror::Error)]
@@ -35,7 +33,6 @@ pub mod invoke {
     }
 
     ///
-    #[allow(clippy::empty_docs)]
     pub mod without_content {
         /// The error returned by [Client::invoke_without_content()][super::super::Client::invoke_without_content()].
         #[derive(Debug, thiserror::Error)]
@@ -259,7 +256,7 @@ struct ReadProcessOutputAndStatus<'a> {
     inner: PacketlineReader<'a>,
 }
 
-impl<'a> std::io::Read for ReadProcessOutputAndStatus<'a> {
+impl std::io::Read for ReadProcessOutputAndStatus<'_> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let num_read = self.inner.read(buf)?;
         if num_read == 0 {

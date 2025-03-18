@@ -134,7 +134,7 @@ impl FromStr for Braces {
 deserialize_enum_str!(Braces);
 
 /// A type of layout to use when generating long lines of code.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Layout {
     Horizontal,
     Vertical,
@@ -370,7 +370,7 @@ impl ExportConfig {
 
     pub(crate) fn rename(&self, item_name: &mut String) {
         if let Some(name) = self.rename.get(item_name) {
-            *item_name = name.clone();
+            item_name.clone_from(name);
             if self.renaming_overrides_prefixing {
                 return;
             }
@@ -586,6 +586,10 @@ pub struct EnumConfig {
     pub deprecated: Option<String>,
     /// The way to annotation this function as #[deprecated] with notes
     pub deprecated_with_note: Option<String>,
+    /// The way to annotate this enum variant as #[deprecated] without notes
+    pub deprecated_variant: Option<String>,
+    /// The way to annotate this enum variant as #[deprecated] with notes
+    pub deprecated_variant_with_note: Option<String>,
     /// Whether to generate destructors of tagged enums.
     pub derive_tagged_enum_destructor: bool,
     /// Whether to generate copy-constructors of tagged enums.
@@ -619,6 +623,8 @@ impl Default for EnumConfig {
             must_use: None,
             deprecated: None,
             deprecated_with_note: None,
+            deprecated_variant: None,
+            deprecated_variant_with_note: None,
             derive_tagged_enum_destructor: false,
             derive_tagged_enum_copy_constructor: false,
             derive_tagged_enum_copy_assignment: false,
@@ -913,6 +919,8 @@ pub struct Config {
     /// This option is useful when using cbindgen with tools such as python's cffi which
     /// doesn't understand include directives
     pub no_includes: bool,
+    // Package version: True if the package version should appear as a comment in the .h file
+    pub package_version: bool,
     /// Optional text to output at major sections to deter manual editing
     pub autogen_warning: Option<String>,
     /// Include a comment with the version of cbindgen used to generate the file
@@ -1010,8 +1018,15 @@ pub struct Config {
     pub only_target_dependencies: bool,
     /// Configuration options specific to Cython.
     pub cython: CythonConfig,
+    #[doc(hidden)]
     #[serde(skip)]
-    pub(crate) config_path: Option<StdPathBuf>,
+    /// Internal field for tracking from which file the config was loaded.
+    ///
+    /// Users should not set this field explicitly. Making the field private
+    /// prevents users from filling the struct with `..Default::default()`,
+    /// and creating a new InternalConfig struct would require more breaking
+    /// changes to our public API.
+    pub config_path: Option<StdPathBuf>,
 }
 
 impl Default for Config {
@@ -1027,6 +1042,7 @@ impl Default for Config {
             autogen_warning: None,
             include_version: false,
             no_includes: false,
+            package_version: false,
             namespace: None,
             namespaces: None,
             using_namespaces: None,

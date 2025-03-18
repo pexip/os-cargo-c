@@ -38,17 +38,15 @@ impl SynItemHelpers for syn::ItemFn {
     fn exported_name(&self) -> Option<String> {
         self.attrs
             .attr_name_value_lookup("export_name")
+            .or_else(|| self.unsafe_attr_name_value_lookup("export_name"))
             .or_else(|| {
-                if self.is_no_mangle() {
-                    Some(self.sig.ident.unraw().to_string())
-                } else {
-                    None
-                }
+                self.is_no_mangle()
+                    .then(|| self.sig.ident.unraw().to_string())
             })
     }
 }
 
-impl SynItemHelpers for syn::ImplItemMethod {
+impl SynItemHelpers for syn::ImplItemFn {
     fn exported_name(&self) -> Option<String> {
         self.attrs
             .attr_name_value_lookup("export_name")
@@ -90,14 +88,37 @@ fn is_skip_item_attr(attr: &syn::Meta) -> bool {
             if !list.path.is_ident("cfg") {
                 return false;
             }
-            list.nested.iter().any(|nested| match *nested {
-                syn::NestedMeta::Meta(ref meta) => is_skip_item_attr(meta),
-                syn::NestedMeta::Lit(..) => false,
-            })
+
+            // Remove commas of the question by parsing
+            let parser = syn::punctuated::Punctuated::<proc_macro2::TokenStream, syn::Token![,]>::parse_terminated;
+            let Ok(tokens) = list.parse_args_with(parser) else {
+                // cfg attr is a list separated by comma, if that fails, that is probably a malformed cfg attribute
+                return false;
+            };
+
+            for token in tokens {
+                let Ok(path) = syn::parse2::<syn::Path>(token) else {
+                    // we are looking for `test`, that should always happen only as path
+                    return false;
+                };
+
+                if path.is_ident("test") {
+                    return true;
+                }
+            }
+            false
+            // list.nested.iter().any(|nested| match *nested {
+            //     syn::NestedMeta::Meta(ref meta) => is_skip_item_attr(meta),
+            //     syn::NestedMeta::Lit(..) => false,
+            // })
         }
         syn::Meta::NameValue(ref name_value) => {
             if name_value.path.is_ident("doc") {
-                if let syn::Lit::Str(ref content) = name_value.lit {
+                if let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(ref content),
+                    ..
+                }) = name_value.value
+                {
                     // FIXME(emilio): Maybe should use the general annotation
                     // mechanism, but it seems overkill for this.
                     if content.value().trim() == "cbindgen:ignore" {
@@ -118,16 +139,37 @@ pub trait SynAttributeHelpers {
     /// Example:
     /// - `item.has_attr_word("test")` => `#[test]`
     fn has_attr_word(&self, name: &str) -> bool {
-        self.attrs()
-            .iter()
-            .filter_map(|x| x.parse_meta().ok())
-            .any(|attr| {
-                if let syn::Meta::Path(ref path) = attr {
-                    path.is_ident(name)
-                } else {
-                    false
-                }
-            })
+        self.attrs().iter().any(|attr| {
+            if let syn::Meta::Path(ref path) = &attr.meta {
+                path.is_ident(name)
+            } else {
+                false
+            }
+        })
+    }
+
+    /// Searches for attributes like `#[unsafe(test)]`.
+    /// Example:
+    /// - `item.has_unsafe_attr_word("test")` => `#[unsafe(test)]`
+    fn has_unsafe_attr_word(&self, name: &str) -> bool {
+        for attr in self.attrs() {
+            let unsafe_list = match &attr.meta {
+                syn::Meta::List(list) if list.path.is_ident("unsafe") => list,
+                _ => continue,
+            };
+            let args: syn::punctuated::Punctuated<syn::Path, Token![,]> =
+                match unsafe_list.parse_args_with(syn::punctuated::Punctuated::parse_terminated) {
+                    Ok(args) => args,
+                    Err(..) => {
+                        warn!("couldn't parse unsafe() attribute");
+                        continue;
+                    }
+                };
+            if args.iter().any(|a| a.is_ident(name)) {
+                return true;
+            }
+        }
+        false
     }
 
     fn find_deprecated_note(&self) -> Option<String> {
@@ -144,24 +186,29 @@ pub trait SynAttributeHelpers {
 
         // #[deprecated(note = "")]
         let attr = attrs.iter().find(|attr| {
-            if let Ok(syn::Meta::List(list)) = attr.parse_meta() {
+            if let syn::Meta::List(list) = &attr.meta {
                 list.path.is_ident("deprecated")
             } else {
                 false
             }
         })?;
 
-        let args: syn::punctuated::Punctuated<syn::MetaNameValue, Token![,]> =
-            match attr.parse_args_with(syn::punctuated::Punctuated::parse_terminated) {
-                Ok(args) => args,
-                Err(_) => {
-                    warn!("couldn't parse deprecated attribute");
-                    return None;
-                }
-            };
+        let parser =
+            syn::punctuated::Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated;
+        let args = match attr.parse_args_with(parser) {
+            Ok(args) => args,
+            Err(_) => {
+                warn!("couldn't parse deprecated attribute");
+                return None;
+            }
+        };
 
         let arg = args.iter().find(|arg| arg.path.is_ident("note"))?;
-        if let syn::Lit::Str(ref lit) = arg.lit {
+        if let syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(ref lit),
+            ..
+        }) = arg.value
+        {
             Some(lit.value())
         } else {
             warn!("deprecated attribute must be a string");
@@ -170,17 +217,13 @@ pub trait SynAttributeHelpers {
     }
 
     fn is_no_mangle(&self) -> bool {
-        self.has_attr_word("no_mangle")
+        self.has_attr_word("no_mangle") || self.has_unsafe_attr_word("no_mangle")
     }
 
     /// Sees whether we should skip parsing a given item.
     fn should_skip_parsing(&self) -> bool {
         for attr in self.attrs() {
-            let meta = match attr.parse_meta() {
-                Ok(attr) => attr,
-                Err(..) => return false,
-            };
-            if is_skip_item_attr(&meta) {
+            if is_skip_item_attr(&attr.meta) {
                 return true;
             }
         }
@@ -192,14 +235,43 @@ pub trait SynAttributeHelpers {
         self.attrs()
             .iter()
             .filter_map(|attr| {
-                let attr = attr.parse_meta().ok()?;
                 if let syn::Meta::NameValue(syn::MetaNameValue {
                     path,
-                    lit: syn::Lit::Str(lit),
+                    value:
+                        syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Str(lit),
+                            ..
+                        }),
                     ..
-                }) = attr
+                }) = &attr.meta
                 {
                     if path.is_ident(name) {
+                        return Some(lit.value());
+                    }
+                }
+                None
+            })
+            .next()
+    }
+
+    fn unsafe_attr_name_value_lookup(&self, name: &str) -> Option<String> {
+        self.attrs()
+            .iter()
+            .filter_map(|attr| {
+                let syn::Meta::List(list) = &attr.meta else { return None };
+                if !list.path.is_ident("unsafe") {
+                    return None;
+                }
+                let parser = syn::punctuated::Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated;
+                let Ok(args) = list.parse_args_with(parser) else { return None };
+                for arg in args {
+                    if !arg.path.is_ident(name) {
+                        continue;
+                    }
+                    if let syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(lit),
+                        ..
+                    }) = arg.value {
                         return Some(lit.value());
                     }
                 }
@@ -213,11 +285,15 @@ pub trait SynAttributeHelpers {
 
         for attr in self.attrs() {
             if attr.style == syn::AttrStyle::Outer {
-                if let Ok(syn::Meta::NameValue(syn::MetaNameValue {
+                if let syn::Meta::NameValue(syn::MetaNameValue {
                     path,
-                    lit: syn::Lit::Str(content),
+                    value:
+                        syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Str(content),
+                            ..
+                        }),
                     ..
-                })) = attr.parse_meta()
+                }) = &attr.meta
                 {
                     if path.is_ident("doc") {
                         comment.extend(split_doc_attr(&content.value()));
@@ -240,7 +316,6 @@ macro_rules! syn_item_match_helper {
             syn::Item::ForeignMod(ref $i) => $a,
             syn::Item::Impl(ref $i) => $a,
             syn::Item::Macro(ref $i) => $a,
-            syn::Item::Macro2(ref $i) => $a,
             syn::Item::Mod(ref $i) => $a,
             syn::Item::Static(ref $i) => $a,
             syn::Item::Struct(ref $i) => $a,
@@ -279,7 +354,8 @@ impl_syn_item_helper!(syn::ItemUse);
 impl_syn_item_helper!(syn::ItemStatic);
 impl_syn_item_helper!(syn::ItemConst);
 impl_syn_item_helper!(syn::ItemFn);
-impl_syn_item_helper!(syn::ImplItemMethod);
+impl_syn_item_helper!(syn::ImplItemConst);
+impl_syn_item_helper!(syn::ImplItemFn);
 impl_syn_item_helper!(syn::ItemMod);
 impl_syn_item_helper!(syn::ItemForeignMod);
 impl_syn_item_helper!(syn::ItemType);
@@ -289,7 +365,6 @@ impl_syn_item_helper!(syn::ItemUnion);
 impl_syn_item_helper!(syn::ItemTrait);
 impl_syn_item_helper!(syn::ItemImpl);
 impl_syn_item_helper!(syn::ItemMacro);
-impl_syn_item_helper!(syn::ItemMacro2);
 impl_syn_item_helper!(syn::ItemTraitAlias);
 
 /// Helper function for accessing Abi information

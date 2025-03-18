@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2020-2023 The orion Developers
+// Copyright (c) 2020-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,6 +51,7 @@ pub(crate) mod sha2_core {
         + PartialEq<Self>
         + Zeroize
     {
+        #[cfg(any(debug_assertions, test))]
         const MAX: Self;
 
         fn wrapping_add(&self, rhs: Self) -> Self;
@@ -59,7 +60,7 @@ pub(crate) mod sha2_core {
 
         fn checked_add(&self, rhs: Self) -> Option<Self>;
 
-        fn checked_shl(&self, rhs: u32) -> Option<Self>;
+        fn checked_mul(&self, rhs: Self) -> Option<Self>;
 
         fn rotate_right(&self, rhs: u32) -> Self;
 
@@ -180,21 +181,22 @@ pub(crate) mod sha2_core {
     {
         /// Increment the message length during processing of data.
         pub(crate) fn increment_mlen(&mut self, length: &W) {
-            // The checked shift checks that the right-hand side is a legal shift.
-            // The result can still overflow if length > $primitive::MAX / 8.
-            // Should be impossible for a user to trigger, because update() processes
-            // in SHA(256/384/512)_BLOCKSIZE chunks.
             #[cfg(any(debug_assertions, test))]
             debug_assert!(length.less_than_or_equal(W::MAX / W::from(8)));
 
-            // left-shift to get bit-sized representation of length
-            // using .unwrap() because it should not panic in practice
-            let len = length.checked_shl(3).unwrap();
+            // Length in bits
+            let len: W = match length.checked_mul(W::from(8)) {
+                Some(bitlen) => bitlen,
+                // Should be impossible for a user to trigger, because update() processes
+                // in SHA(256/384/512)_BLOCKSIZE chunks.
+                None => unreachable!(),
+            };
+
             let (res, was_overflow) = self.message_len[1].overflowing_add(len);
             self.message_len[1] = res;
 
             if was_overflow {
-                // If this panics size limit is reached.
+                // If this panics, then size limit is reached.
                 self.message_len[0] = self.message_len[0].checked_add(W::one()).unwrap();
             }
         }
@@ -475,6 +477,7 @@ pub(crate) mod w32 {
     }
 
     impl super::sha2_core::Word for WordU32 {
+        #[cfg(any(debug_assertions, test))]
         const MAX: Self = Self(u32::MAX);
 
         #[inline]
@@ -495,8 +498,8 @@ pub(crate) mod w32 {
         }
 
         #[inline]
-        fn checked_shl(&self, rhs: u32) -> Option<Self> {
-            self.0.checked_shl(rhs).map(Self)
+        fn checked_mul(&self, rhs: Self) -> Option<Self> {
+            self.0.checked_mul(rhs.0).map(Self)
         }
 
         #[inline]
@@ -511,7 +514,7 @@ pub(crate) mod w32 {
 
         #[inline]
         fn size_of() -> usize {
-            core::mem::size_of::<u32>()
+            size_of::<u32>()
         }
 
         #[inline]
@@ -617,6 +620,7 @@ pub(crate) mod w64 {
     }
 
     impl super::sha2_core::Word for WordU64 {
+        #[cfg(any(debug_assertions, test))]
         const MAX: Self = Self(u64::MAX);
 
         #[inline]
@@ -637,8 +641,8 @@ pub(crate) mod w64 {
         }
 
         #[inline]
-        fn checked_shl(&self, rhs: u32) -> Option<Self> {
-            self.0.checked_shl(rhs).map(Self)
+        fn checked_mul(&self, rhs: Self) -> Option<Self> {
+            self.0.checked_mul(rhs.0).map(Self)
         }
 
         #[inline]
@@ -653,7 +657,7 @@ pub(crate) mod w64 {
 
         #[inline]
         fn size_of() -> usize {
-            core::mem::size_of::<u64>()
+            size_of::<u64>()
         }
 
         #[inline]
@@ -707,14 +711,6 @@ mod test_word {
     }
 
     #[test]
-    #[should_panic]
-    #[cfg(target_pointer_width = "128")]
-    // See above note.
-    fn w64_panic_on_above_from() {
-        WordU64::from((u64::MAX as usize) + 1);
-    }
-
-    #[test]
     fn equiv_max() {
         assert_eq!(WordU32::MAX.0, u32::MAX);
         assert_eq!(WordU64::MAX.0, u64::MAX);
@@ -722,8 +718,8 @@ mod test_word {
 
     #[test]
     fn equiv_sizeof() {
-        assert_eq!(WordU32::size_of(), core::mem::size_of::<u32>());
-        assert_eq!(WordU64::size_of(), core::mem::size_of::<u64>());
+        assert_eq!(WordU32::size_of(), size_of::<u32>());
+        assert_eq!(WordU64::size_of(), size_of::<u64>());
     }
 
     #[test]
@@ -901,7 +897,7 @@ mod test_word {
             // Implicitly assume there's no panic
             if WordU32::from(n).0 != n { return false; }
             if WordU64::from(m).0 != m { return false; }
-    
+
             true
         }
 
@@ -911,7 +907,7 @@ mod test_word {
             // WordU32
             let w32n1 = WordU32::from(n1);
             let w32n2 = WordU32::from(n2);
-    
+
             if (w32n1 | w32n2).0 != n1 | n2  { return false; }
             if (w32n1 & w32n2).0 != n1 & n2  { return false; }
             if (w32n1 ^ w32n2).0 != n1 ^ n2  { return false; }
@@ -919,11 +915,11 @@ mod test_word {
             if (w32n1 >> WordU32::from(10usize)).0 != n1 >> 10 { return false; }
             if (w32n1 >> WordU32::from(3usize)).0 != n1 >> 3  { return false; }
             if w32n2.0 != 0 && ((w32n1 / w32n2).0 != n1 / n2) { return false }
-    
+
             // WordU64
             let w64m1 = WordU64::from(m1);
             let w64m2 = WordU64::from(m2);
-    
+
             if (w64m1 | w64m2).0 != m1 | m2  { return false; }
             if (w64m1 & w64m2).0 != m1 & m2  { return false; }
             if (w64m1 ^ w64m2).0 != m1 ^ m2  { return false; }
@@ -931,7 +927,7 @@ mod test_word {
             if (w64m1 >> WordU64::from(7usize)).0 != m1 >> 7 { return false; }
             if (w64m1 >> WordU64::from(6usize)).0 != m1 >> 6 { return false; }
             if w64m2.0 != 0 && ((w64m1 / w64m2).0 != m1 / m2) { return false }
-    
+
             true
         }
 
@@ -991,16 +987,16 @@ mod test_word {
         }
 
         #[quickcheck]
-        fn equiv_checked_shl(n: u32, m: u64, x: u32) -> bool {
+        fn equiv_checked_mul(n: u32, m: u64, x: u32, y: u64) -> bool {
             let w32n = WordU32::from(n);
-            let ret32: bool = match (w32n.checked_shl(x), n.checked_shl(x)) {
+            let ret32: bool = match (w32n.checked_mul(WordU32::from(x)), n.checked_mul(x)) {
                 (Some(w32), Some(n1)) => w32.0 == n1,
                 (None, None) => true,
                 _ => false,
             };
 
             let w64m = WordU64::from(m);
-            let ret64: bool = match (w64m.checked_shl(x), m.checked_shl(x)) {
+            let ret64: bool = match (w64m.checked_mul(WordU64::from(y)), m.checked_mul(y)) {
                 (Some(w64), Some(n1)) => w64.0 == n1,
                 (None, None) => true,
                 _ => false,
@@ -1014,32 +1010,32 @@ mod test_word {
         fn equiv_rotate_right(n: u32, m: u64, x: u32) -> bool {
             let w32n = WordU32::from(n);
             let w64m = WordU64::from(m);
-    
+
             if w32n.rotate_right(x).0 != n.rotate_right(x) { return false; }
             if w64m.rotate_right(x).0 != m.rotate_right(x) { return false; }
-    
+
             true
         }
 
         #[quickcheck]
         #[rustfmt::skip]
         fn equiv_into_from_be(n: u32, m: u64) -> bool {
-    
+
             let w32n = WordU32::from(n);
             let w64m = WordU64::from(m);
-    
-            let mut dest32 = [0u8; core::mem::size_of::<u32>()];
-            let mut dest64 = [0u8; core::mem::size_of::<u64>()];
+
+            let mut dest32 = [0u8; size_of::<u32>()];
+            let mut dest64 = [0u8; size_of::<u64>()];
             w32n.as_be(&mut dest32);
             w64m.as_be(&mut dest64);
-    
+
             if dest32 != n.to_be_bytes() { return false; }
             if dest64 != m.to_be_bytes() { return false; }
-    
-    
+
+
             if w32n.0 != u32::from_be_bytes(dest32) { return false; }
             if w64m.0 != u64::from_be_bytes(dest64) { return false; }
-    
+
             true
         }
 
@@ -1052,10 +1048,10 @@ mod test_word {
             let w32n2 = WordU32::from(n2);
             let w64m1 = WordU64::from(m1);
             let w64m2 = WordU64::from(m2);
-    
+
             if w32n1.less_than_or_equal(w32n2) != (n1 <= n2) { return false; }
             if w64m1.less_than_or_equal(w64m2) != (m1 <= m2) { return false; }
-    
+
             true
         }
     }

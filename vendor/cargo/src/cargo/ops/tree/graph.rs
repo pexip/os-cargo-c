@@ -6,7 +6,7 @@ use crate::core::dependency::DepKind;
 use crate::core::resolver::features::{CliFeatures, FeaturesFor, ResolvedFeatures};
 use crate::core::resolver::Resolve;
 use crate::core::{FeatureMap, FeatureValue, Package, PackageId, PackageIdSpec, Workspace};
-use crate::util::interning::InternedString;
+use crate::util::interning::{InternedString, INTERNED_DEFAULT};
 use crate::util::CargoResult;
 use std::collections::{HashMap, HashSet};
 
@@ -74,9 +74,9 @@ pub struct Graph<'a> {
     /// For example `--features foo` will mark the "foo" node here.
     cli_features: HashSet<usize>,
     /// Map of dependency names, used for building internal feature map for
-    /// dep_name/feat_name syntax.
+    /// `dep_name/feat_name` syntax.
     ///
-    /// Key is the index of a package node, value is a map of dep_name to a
+    /// Key is the index of a package node, value is a map of `dep_name` to a
     /// set of `(pkg_node_index, is_optional)`.
     dep_name_map: HashMap<usize, HashMap<InternedString, HashSet<(usize, bool)>>>,
 }
@@ -126,7 +126,7 @@ impl<'a> Graph<'a> {
         &self.nodes[index]
     }
 
-    /// Given a slice of PackageIds, returns the indexes of all nodes that match.
+    /// Given a slice of `PackageIds`, returns the indexes of all nodes that match.
     pub fn indexes_from_ids(&self, package_ids: &[PackageId]) -> Vec<usize> {
         let mut result: Vec<(&Node, usize)> = self
             .nodes
@@ -391,10 +391,32 @@ fn add_pkg(
         let dep_pkg = graph.package_map[&dep_id];
 
         for dep in deps {
-            let dep_features_for = if dep.is_build() || dep_pkg.proc_macro() {
-                FeaturesFor::HostDep
-            } else {
-                features_for
+            let dep_features_for = match dep
+                .artifact()
+                .and_then(|artifact| artifact.target())
+                .and_then(|target| target.to_resolved_compile_target(requested_kind))
+            {
+                // Dependency has a `{ …, target = <triple> }`
+                Some(target) => FeaturesFor::ArtifactDep(target),
+                // Get the information of the dependent crate from `features_for`.
+                // If a dependent crate is
+                //
+                // * specified as an artifact dep with a `target`, or
+                // * a host dep,
+                //
+                // its transitive deps, including build-deps, need to be built on that target.
+                None if features_for != FeaturesFor::default() => features_for,
+                // Dependent crate is a normal dep, then back to old rules:
+                //
+                // * normal deps, dev-deps -> inherited target
+                // * build-deps -> host
+                None => {
+                    if dep.is_build() || dep_pkg.proc_macro() {
+                        FeaturesFor::HostDep
+                    } else {
+                        features_for
+                    }
+                }
             };
             let dep_index = add_pkg(
                 graph,
@@ -415,7 +437,7 @@ fn add_pkg(
                 if dep.uses_default_features() {
                     add_feature(
                         graph,
-                        InternedString::new("default"),
+                        INTERNED_DEFAULT,
                         Some(from_index),
                         dep_index,
                         EdgeKind::Dep(dep.kind()),
@@ -505,7 +527,7 @@ fn add_cli_features(
     }
 
     if cli_features.uses_default_features {
-        to_add.insert(FeatureValue::Feature(InternedString::new("default")));
+        to_add.insert(FeatureValue::Feature(INTERNED_DEFAULT));
     }
     to_add.extend(cli_features.features.iter().cloned());
 

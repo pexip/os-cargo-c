@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.9
+
+* Adds a `latest_stable_rust` cargo feature, which will automatically pull in
+  other cargo features related to the latest Stable version of rust.
+* Adds `ArrayVec::try_from_array_len`
+* Adds `TinyVec::into_vec` and `TinyVec::into_boxed_slice`
+* Adds support for `generic-array` crate
+* Adds support for the `borsh` crate
+
+## 1.8.1
+
+* [e00E](https://github.com/e00E) updated the rustc features so that they all
+  correctly depend on the lower version feature.
+  [pr 199](https://github.com/Lokathor/tinyvec/pull/199)
+
 ## 1.8
 
 * [Fuuzetsu](https://github.com/Fuuzetsu) added the `ArrayVec::as_inner` method.
@@ -68,13 +83,13 @@
 ## 1.1.0
 
 * [slightlyoutofphase](https://github.com/slightlyoutofphase)
-added "array splat" style syntax to the `array_vec!` and `tiny_vec!` macros.
-You can now write `array_vec![true; 5]` and get a length 5 array vec full of `true`,
-just like normal array initialization allows. Same goes for `tiny_vec!`.
-([pr 118](https://github.com/Lokathor/tinyvec/pull/118))
+  added "array splat" style syntax to the `array_vec!` and `tiny_vec!` macros.
+  You can now write `array_vec![true; 5]` and get a length 5 array vec full of `true`,
+  just like normal array initialization allows. Same goes for `tiny_vec!`.
+  ([pr 118](https://github.com/Lokathor/tinyvec/pull/118))
 * [not-a-seagull](https://github.com/not-a-seagull)
-added `ArrayVec::into_inner` so that you can get the array out of an `ArrayVec`.
-([pr 124](https://github.com/Lokathor/tinyvec/pull/124))
+  added `ArrayVec::into_inner` so that you can get the array out of an `ArrayVec`.
+  ([pr 124](https://github.com/Lokathor/tinyvec/pull/124))
 
 ## 1.0.2
 

@@ -35,7 +35,14 @@
 #include <cinttypes>
 #include <cstdlib>
 
-#include <openssl/rand.h>
+#include "ssl_compat.h"
+
+#ifdef NGHTTP2_OPENSSL_IS_WOLFSSL
+#  include <wolfssl/options.h>
+#  include <wolfssl/openssl/rand.h>
+#else // !NGHTTP2_OPENSSL_IS_WOLFSSL
+#  include <openssl/rand.h>
+#endif // !NGHTTP2_OPENSSL_IS_WOLFSSL
 
 #include <ev.h>
 
@@ -65,7 +72,7 @@ namespace shrpx {
 namespace {
 void drop_privileges(
 #ifdef HAVE_NEVERBLEED
-    neverbleed_t *nb
+  neverbleed_t *nb
 #endif // HAVE_NEVERBLEED
 ) {
   std::array<char, STRERROR_BUFSIZE> errbuf;
@@ -74,11 +81,11 @@ void drop_privileges(
   if (getuid() == 0 && config->uid != 0) {
 #ifdef HAVE_NEVERBLEED
     if (nb) {
-      neverbleed_setuidgid(nb, config->user.c_str(), 1);
+      neverbleed_setuidgid(nb, config->user.data(), 1);
     }
 #endif // HAVE_NEVERBLEED
 
-    if (initgroups(config->user.c_str(), config->gid) != 0) {
+    if (initgroups(config->user.data(), config->gid) != 0) {
       auto error = errno;
       LOG(FATAL) << "Could not change supplementary groups: "
                  << xsi_strerror(error, errbuf.data(), errbuf.size());
@@ -242,9 +249,9 @@ void renew_ticket_key_cb(struct ev_loop *loop, ev_timer *w, int revents) {
     assert(!old_keys.empty());
 
     auto max_tickets =
-        static_cast<size_t>(std::chrono::duration_cast<std::chrono::hours>(
-                                get_config()->tls.session_timeout)
-                                .count());
+      static_cast<size_t>(std::chrono::duration_cast<std::chrono::hours>(
+                            get_config()->tls.session_timeout)
+                            .count());
 
     new_keys.resize(std::min(max_tickets, old_keys.size() + 1));
     std::copy_n(std::begin(old_keys), new_keys.size() - 1,
@@ -476,12 +483,12 @@ int worker_process_event_loop(WorkerProcessConfig *wpconf) {
 #ifdef ENABLE_HTTP3
   conn_handler->set_quic_ipc_fd(wpconf->quic_ipc_fd);
   conn_handler->set_quic_lingering_worker_processes(
-      wpconf->quic_lingering_worker_processes);
+    wpconf->quic_lingering_worker_processes);
 #endif // ENABLE_HTTP3
 
   for (auto &addr : config->conn.listener.addrs) {
     conn_handler->add_acceptor(
-        std::make_unique<AcceptHandler>(&addr, conn_handler.get()));
+      std::make_unique<AcceptHandler>(&addr, conn_handler.get()));
   }
 
   MemchunkPool mcpool;
@@ -499,9 +506,9 @@ int worker_process_event_loop(WorkerProcessConfig *wpconf) {
       }
 
       conn_handler->set_tls_ticket_key_memcached_dispatcher(
-          std::make_unique<MemcachedDispatcher>(
-              &ticketconf.memcached.addr, loop, ssl_ctx,
-              StringRef{memcachedconf.host}, &mcpool, gen));
+        std::make_unique<MemcachedDispatcher>(
+          &ticketconf.memcached.addr, loop, ssl_ctx,
+          StringRef{memcachedconf.host}, &mcpool, gen));
 
       ev_timer_init(&renew_ticket_key_timer, memcached_get_ticket_key_cb, 0.,
                     0.);
@@ -513,15 +520,15 @@ int worker_process_event_loop(WorkerProcessConfig *wpconf) {
       if (!ticketconf.files.empty()) {
         if (!ticketconf.cipher_given) {
           LOG(WARN)
-              << "It is strongly recommended to specify "
-                 "--tls-ticket-key-cipher=aes-128-cbc (or "
-                 "tls-ticket-key-cipher=aes-128-cbc in configuration file) "
-                 "when --tls-ticket-key-file is used for the smooth "
-                 "transition when the default value of --tls-ticket-key-cipher "
-                 "becomes aes-256-cbc";
+            << "It is strongly recommended to specify "
+               "--tls-ticket-key-cipher=aes-128-cbc (or "
+               "tls-ticket-key-cipher=aes-128-cbc in configuration file) "
+               "when --tls-ticket-key-file is used for the smooth "
+               "transition when the default value of --tls-ticket-key-cipher "
+               "becomes aes-256-cbc";
         }
         auto ticket_keys = read_tls_ticket_key_file(
-            ticketconf.files, ticketconf.cipher, EVP_sha256());
+          ticketconf.files, ticketconf.cipher, EVP_sha256());
         if (!ticket_keys) {
           LOG(WARN) << "Use internal session ticket key generator";
         } else {
@@ -576,10 +583,8 @@ int worker_process_event_loop(WorkerProcessConfig *wpconf) {
   }
 
   for (auto &qkm : qkms->keying_materials) {
-    if (generate_quic_connection_id_encryption_key(
-            qkm.cid_encryption_key.data(), qkm.cid_encryption_key.size(),
-            qkm.secret.data(), qkm.secret.size(), qkm.salt.data(),
-            qkm.salt.size()) != 0) {
+    if (generate_quic_connection_id_encryption_key(qkm.cid_encryption_key,
+                                                   qkm.secret, qkm.salt) != 0) {
       LOG(ERROR) << "Failed to generate QUIC Connection ID encryption key";
       return -1;
     }
@@ -588,7 +593,7 @@ int worker_process_event_loop(WorkerProcessConfig *wpconf) {
     if (!EVP_EncryptInit_ex(qkm.cid_encryption_ctx, EVP_aes_128_ecb(), nullptr,
                             qkm.cid_encryption_key.data(), nullptr)) {
       LOG(ERROR)
-          << "Failed to initialize QUIC Connection ID encryption context";
+        << "Failed to initialize QUIC Connection ID encryption context";
       return -1;
     }
 
@@ -598,7 +603,7 @@ int worker_process_event_loop(WorkerProcessConfig *wpconf) {
     if (!EVP_DecryptInit_ex(qkm.cid_decryption_ctx, EVP_aes_128_ecb(), nullptr,
                             qkm.cid_encryption_key.data(), nullptr)) {
       LOG(ERROR)
-          << "Failed to initialize QUIC Connection ID decryption context";
+        << "Failed to initialize QUIC Connection ID decryption context";
       return -1;
     }
 
@@ -609,7 +614,7 @@ int worker_process_event_loop(WorkerProcessConfig *wpconf) {
 
   conn_handler->set_worker_ids(wpconf->worker_ids);
   conn_handler->set_quic_lingering_worker_processes(
-      wpconf->quic_lingering_worker_processes);
+    wpconf->quic_lingering_worker_processes);
 #endif // ENABLE_HTTP3
 
   if (config->single_thread) {
@@ -652,7 +657,7 @@ int worker_process_event_loop(WorkerProcessConfig *wpconf) {
 
   drop_privileges(
 #ifdef HAVE_NEVERBLEED
-      nb.get()
+    nb.get()
 #endif // HAVE_NEVERBLEED
   );
 

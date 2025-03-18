@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2020-2023 The orion Developers
+// Copyright (c) 2020-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -259,7 +259,7 @@ impl io::Write for Sha256 {
     /// ## Errors:
     /// This function will only ever return the [`std::io::ErrorKind::Other`]()
     /// variant when it returns an error. Additionally, this will always contain Orion's
-    /// [`UnknownCryptoError`](crate::errors::UnknownCryptoError) type.
+    /// [`UnknownCryptoError`] type.
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.update(bytes)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
@@ -267,7 +267,7 @@ impl io::Write for Sha256 {
     }
 
     /// This type doesn't buffer writes, so flushing is a no-op.
-    fn flush(&mut self) -> Result<(), std::io::Error> {
+    fn flush(&mut self) -> Result<(), io::Error> {
         Ok(())
     }
 }

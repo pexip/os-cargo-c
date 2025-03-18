@@ -204,7 +204,7 @@ impl<'s, B: crate::backend::HeapStr> Ord for KStringCowBase<'s, B> {
 impl<'s, B: crate::backend::HeapStr> PartialOrd for KStringCowBase<'s, B> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.as_str().partial_cmp(other.as_str())
+        Some(self.cmp(other))
     }
 }
 
@@ -246,7 +246,7 @@ impl<'s, B: crate::backend::HeapStr> AsRef<[u8]> for KStringCowBase<'s, B> {
 impl<'s, B: crate::backend::HeapStr> AsRef<std::ffi::OsStr> for KStringCowBase<'s, B> {
     #[inline]
     fn as_ref(&self) -> &std::ffi::OsStr {
-        (&**self).as_ref()
+        (**self).as_ref()
     }
 }
 

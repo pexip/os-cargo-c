@@ -160,7 +160,7 @@ impl Base64Impl {
         let b64_len = b64.len();
         let mut b64_pos = 0usize;
         while padding_len > 0 {
-            if b64_pos > b64_len {
+            if b64_pos >= b64_len {
                 return Err(Error::InvalidInput);
             }
             let c = b64[b64_pos];
@@ -348,7 +348,7 @@ impl Decoder for Base64UrlSafeNoPadding {
 fn test_base64() {
     let bin = [1u8, 5, 11, 15, 19, 131, 122];
     let expected = "AQULDxODeg==";
-    let b64 = Base64::encode_to_string(&bin).unwrap();
+    let b64 = Base64::encode_to_string(bin).unwrap();
     assert_eq!(b64, expected);
     let bin2 = Base64::decode_to_vec(&b64, None).unwrap();
     assert_eq!(bin, &bin2[..]);
@@ -358,11 +358,11 @@ fn test_base64() {
 #[test]
 fn test_base64_mising_padding() {
     let missing_padding = "AA";
-    assert!(Base64::decode_to_vec(&missing_padding, None).is_err());
-    assert!(Base64NoPadding::decode_to_vec(&missing_padding, None).is_ok());
+    assert!(Base64::decode_to_vec(missing_padding, None).is_err());
+    assert!(Base64NoPadding::decode_to_vec(missing_padding, None).is_ok());
     let missing_padding = "AAA";
-    assert!(Base64::decode_to_vec(&missing_padding, None).is_err());
-    assert!(Base64NoPadding::decode_to_vec(&missing_padding, None).is_ok());
+    assert!(Base64::decode_to_vec(missing_padding, None).is_err());
+    assert!(Base64NoPadding::decode_to_vec(missing_padding, None).is_ok());
 }
 
 #[test]
@@ -370,9 +370,20 @@ fn test_base64_no_std() {
     let bin = [1u8, 5, 11, 15, 19, 131, 122];
     let expected = [65, 81, 85, 76, 68, 120, 79, 68, 101, 103, 61, 61];
     let mut b64 = [0u8; 12];
-    let b64 = Base64::encode(&mut b64, &bin).unwrap();
+    let b64 = Base64::encode(&mut b64, bin).unwrap();
     assert_eq!(b64, expected);
     let mut bin2 = [0u8; 7];
-    let bin2 = Base64::decode(&mut bin2, &b64, None).unwrap();
+    let bin2 = Base64::decode(&mut bin2, b64, None).unwrap();
     assert_eq!(bin, bin2);
+}
+
+#[test]
+fn test_base64_invalid_padding() {
+    let valid_padding = "AA==";
+    assert_eq!(Base64::decode_to_vec(valid_padding, None), Ok(vec![0u8; 1]));
+    let invalid_padding = "AA=";
+    assert_eq!(
+        Base64::decode_to_vec(invalid_padding, None),
+        Err(Error::InvalidInput)
+    );
 }

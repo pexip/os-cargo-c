@@ -35,8 +35,6 @@
 #include <fcntl.h>
 #endif
 
-#define ENABLE_CURLX_PRINTF
-/* use our own printf() functions */
 #include "curlx.h"
 
 #include "tool_cfgable.h"
@@ -65,6 +63,15 @@
 int vms_show = 0;
 #endif
 
+#if defined(__AMIGA__)
+#if defined(__GNUC__)
+#define CURL_USED __attribute__((used))
+#else
+#define CURL_USED
+#endif
+static const char CURL_USED min_stack[] = "$STACK:16384";
+#endif
+
 #ifdef __MINGW32__
 /*
  * There seems to be no way to escape "*" in command-line arguments with MinGW
@@ -81,7 +88,7 @@ int _CRT_glob = 0;
 #if defined(HAVE_PIPE) && defined(HAVE_FCNTL)
 /*
  * Ensure that file descriptors 0, 1 and 2 (stdin, stdout, stderr) are
- * open before starting to run.  Otherwise, the first three network
+ * open before starting to run. Otherwise, the first three network
  * sockets opened by curl could be used for input sources, downloaded data
  * or error logs as they will effectively be stdin, stdout and/or stderr.
  *
@@ -110,7 +117,7 @@ static void memory_tracking_init(void)
   /* if CURL_MEMDEBUG is set, this starts memory tracking message logging */
   env = curl_getenv("CURL_MEMDEBUG");
   if(env) {
-    /* use the value as file name */
+    /* use the value as filename */
     char fname[CURL_MT_LOGFNAME_BUFSIZE];
     if(strlen(env) >= CURL_MT_LOGFNAME_BUFSIZE)
       env[CURL_MT_LOGFNAME_BUFSIZE-1] = '\0';
@@ -144,7 +151,7 @@ static CURLcode main_init(struct GlobalConfig *config)
 {
   CURLcode result = CURLE_OK;
 
-#if defined(__DJGPP__) || defined(__GO32__)
+#ifdef __DJGPP__
   /* stop stat() wasting time */
   _djstat_flags |= _STAT_INODE | _STAT_EXEC_MAGIC | _STAT_DIRSIZE;
 #endif
@@ -218,8 +225,8 @@ static void main_free(struct GlobalConfig *config)
 ** curl tool main function.
 */
 #ifdef _UNICODE
-#if defined(__GNUC__)
-/* GCC doesn't know about wmain() */
+#if defined(__GNUC__) || defined(__clang__)
+/* GCC does not know about wmain() */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-prototypes"
 #pragma GCC diagnostic ignored "-Wmissing-declarations"
@@ -289,7 +296,7 @@ int main(int argc, char *argv[])
 }
 
 #ifdef _UNICODE
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
 #endif

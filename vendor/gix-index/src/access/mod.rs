@@ -28,7 +28,7 @@ impl State {
     /// **will cause (file system) race conditions** see racy-git.txt in the git documentation
     /// for more details.
     pub fn set_timestamp(&mut self, timestamp: FileTime) {
-        self.timestamp = timestamp
+        self.timestamp = timestamp;
     }
 
     /// Return the kind of hashes used in this instance.
@@ -215,7 +215,7 @@ impl State {
         directory: &BStr,
         ignore_case: bool,
         lookup: &AccelerateLookup<'a>,
-    ) -> Option<&Entry> {
+    ) -> Option<&'a Entry> {
         lookup
             .icase_dirs
             .find(AccelerateLookup::icase_hash(directory), |dir| {
@@ -389,7 +389,7 @@ impl State {
     }
 }
 
-impl<'a> AccelerateLookup<'a> {
+impl AccelerateLookup<'_> {
     fn with_capacity(cap: usize) -> Self {
         let ratio_of_entries_to_dirs_in_webkit = 20; // 400k entries and 20k dirs
         Self {

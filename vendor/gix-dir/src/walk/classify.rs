@@ -13,14 +13,14 @@ pub fn root(
     worktree_root: &Path,
     buf: &mut BString,
     worktree_relative_root: &Path,
-    options: Options,
+    options: Options<'_>,
     ctx: &mut Context<'_>,
 ) -> Result<(Outcome, bool), Error> {
     buf.clear();
     let mut last_length = None;
     let mut path_buf = worktree_root.to_owned();
     // These initial values kick in if worktree_relative_root.is_empty();
-    let file_kind = path_buf.symlink_metadata().map(|m| m.file_type().into()).ok();
+    let file_kind = path_buf.symlink_metadata().ok().map(|m| m.file_type().into());
     let mut out = path(&mut path_buf, buf, 0, file_kind, || None, options, ctx)?;
     let worktree_root_is_repository = out
         .disk_kind
@@ -32,7 +32,7 @@ pub fn root(
         }
         path_buf.push(component);
         buf.extend_from_slice(gix_path::os_str_into_bstr(component.as_os_str()).expect("no illformed UTF8"));
-        let file_kind = path_buf.symlink_metadata().map(|m| m.file_type().into()).ok();
+        let file_kind = path_buf.symlink_metadata().ok().map(|m| m.file_type().into());
 
         out = path(
             &mut path_buf,
@@ -122,6 +122,8 @@ impl<'a> EntryRef<'a> {
 ///
 /// Returns `(status, file_kind, pathspec_matches_how)` to identify the `status` on disk, along with a classification `file_kind`,
 /// and if `file_kind` is not a directory, the way the pathspec matched with `pathspec_matches_how`.
+///
+/// Note that non-files are pruned by default.
 pub fn path(
     path: &mut PathBuf,
     rela_path: &mut BString,
@@ -135,8 +137,9 @@ pub fn path(
         for_deletion,
         classify_untracked_bare_repositories,
         symlinks_to_directories_are_ignored_like_directories,
+        worktree_relative_worktree_dirs,
         ..
-    }: Options,
+    }: Options<'_>,
     ctx: &mut Context<'_>,
 ) -> Result<Outcome, Error> {
     let mut out = Outcome {
@@ -169,6 +172,7 @@ pub fn path(
                         .map(|platform| platform.excluded_kind())
                 })
                 .map_err(Error::ExcludesAccess)?
+                .filter(|_| filename_start_idx > 0)
             {
                 out.status = entry::Status::Ignored(excluded);
             }
@@ -190,18 +194,24 @@ pub fn path(
     );
     let mut kind = uptodate_index_kind.or(disk_kind).or_else(on_demand_disk_kind);
 
+    // We always check the pathspec to have the value filled in reliably.
+    out.pathspec_match = ctx
+        .pathspec
+        .pattern_matching_relative_path(rela_path.as_bstr(), kind.map(|ft| ft.is_dir()), ctx.pathspec_attributes)
+        .map(Into::into);
+
+    if worktree_relative_worktree_dirs.map_or(false, |worktrees| worktrees.contains(&*rela_path)) {
+        return Ok(out
+            .with_kind(Some(entry::Kind::Repository), None)
+            .with_status(entry::Status::Tracked));
+    }
+
     let maybe_status = if property.is_none() {
         (index_kind.map(|k| k.is_dir()) == kind.map(|k| k.is_dir())).then_some(entry::Status::Tracked)
     } else {
         out.property = property;
         Some(entry::Status::Pruned)
     };
-
-    // We always check the pathspec to have the value filled in reliably.
-    out.pathspec_match = ctx
-        .pathspec
-        .pattern_matching_relative_path(rela_path.as_bstr(), kind.map(|ft| ft.is_dir()), ctx.pathspec_attributes)
-        .map(Into::into);
 
     let is_dir = if symlinks_to_directories_are_ignored_like_directories
         && ctx.excludes.is_some()
@@ -213,37 +223,14 @@ pub fn path(
     };
 
     let mut maybe_upgrade_to_repository = |current_kind, find_harder: bool| {
-        if recurse_repositories {
-            return current_kind;
-        }
-        if find_harder {
-            let mut is_nested_repo = gix_discover::is_git(path).is_ok();
-            if is_nested_repo {
-                let git_dir_is_our_own =
-                    gix_path::realpath_opts(path, ctx.current_dir, gix_path::realpath::MAX_SYMLINKS)
-                        .ok()
-                        .map_or(false, |realpath_candidate| realpath_candidate == ctx.git_dir_realpath);
-                is_nested_repo = !git_dir_is_our_own;
-            }
-            if is_nested_repo {
-                return Some(entry::Kind::Repository);
-            }
-        }
-        path.push(gix_discover::DOT_GIT_DIR);
-        let mut is_nested_nonbare_repo = gix_discover::is_git(path).is_ok();
-        if is_nested_nonbare_repo {
-            let git_dir_is_our_own = gix_path::realpath_opts(path, ctx.current_dir, gix_path::realpath::MAX_SYMLINKS)
-                .ok()
-                .map_or(false, |realpath_candidate| realpath_candidate == ctx.git_dir_realpath);
-            is_nested_nonbare_repo = !git_dir_is_our_own;
-        }
-        path.pop();
-
-        if is_nested_nonbare_repo {
-            Some(entry::Kind::Repository)
-        } else {
-            current_kind
-        }
+        maybe_upgrade_to_repository(
+            current_kind,
+            find_harder,
+            recurse_repositories,
+            path,
+            ctx.current_dir,
+            ctx.git_dir_realpath,
+        )
     };
     if let Some(status) = maybe_status {
         if kind == Some(entry::Kind::Directory) && index_kind == Some(entry::Kind::Repository) {
@@ -256,6 +243,7 @@ pub fn path(
     if let Some(excluded) = ctx
         .excludes
         .as_mut()
+        .filter(|_| !rela_path.is_empty())
         .map_or(Ok(None), |stack| {
             stack
                 .at_entry(rela_path.as_bstr(), is_dir, ctx.objects)
@@ -279,8 +267,17 @@ pub fn path(
                     ),
                 );
             }
-            if kind.map_or(false, |d| d.is_recursable_dir()) && out.pathspec_match.is_none() {
-                // we have patterns that didn't match at all, *yet*. We want to look inside.
+            if kind.map_or(false, |d| d.is_recursable_dir())
+                && (out.pathspec_match.is_none()
+                    || worktree_relative_worktree_dirs.map_or(false, |worktrees| {
+                        for_deletion.is_some()
+                            && worktrees
+                                .iter()
+                                .any(|dir| dir.starts_with_str(&*rela_path) && dir.get(rela_path.len()) == Some(&b'/'))
+                    }))
+            {
+                // We have patterns that didn't match at all, *yet*, or there are contained worktrees.
+                // We want to look inside.
                 out.pathspec_match = Some(PathspecMatch::Prefix);
             }
         }
@@ -298,6 +295,46 @@ pub fn path(
         status = entry::Status::Pruned;
     }
     Ok(out.with_status(status).with_kind(kind, index_kind))
+}
+
+pub fn maybe_upgrade_to_repository(
+    current_kind: Option<entry::Kind>,
+    find_harder: bool,
+    recurse_repositories: bool,
+    path: &mut PathBuf,
+    current_dir: &Path,
+    git_dir_realpath: &Path,
+) -> Option<entry::Kind> {
+    if recurse_repositories {
+        return current_kind;
+    }
+    if find_harder {
+        let mut is_nested_repo = gix_discover::is_git(path).is_ok();
+        if is_nested_repo {
+            let git_dir_is_our_own = gix_path::realpath_opts(path, current_dir, gix_path::realpath::MAX_SYMLINKS)
+                .ok()
+                .map_or(false, |realpath_candidate| realpath_candidate == git_dir_realpath);
+            is_nested_repo = !git_dir_is_our_own;
+        }
+        if is_nested_repo {
+            return Some(entry::Kind::Repository);
+        }
+    }
+    path.push(gix_discover::DOT_GIT_DIR);
+    let mut is_nested_nonbare_repo = gix_discover::is_git(path).is_ok();
+    if is_nested_nonbare_repo {
+        let git_dir_is_our_own = gix_path::realpath_opts(path, current_dir, gix_path::realpath::MAX_SYMLINKS)
+            .ok()
+            .map_or(false, |realpath_candidate| realpath_candidate == git_dir_realpath);
+        is_nested_nonbare_repo = !git_dir_is_our_own;
+    }
+    path.pop();
+
+    if is_nested_nonbare_repo {
+        Some(entry::Kind::Repository)
+    } else {
+        current_kind
+    }
 }
 
 /// Note that `rela_path` is used as buffer for convenience, but will be left as is when this function returns.

@@ -41,7 +41,7 @@ impl ToTokens for SpanError {
     }
 }
 
-/// All possible errors which can occur when calling one of the three public macros.
+/// All possible errors which can occur when calling one of the public macros.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Error {
     /// Error during the initial parsing of the macro arguments.
@@ -58,12 +58,12 @@ pub enum Error {
     UnclosedTag,
     /// Trying to close a previous tag, while there are no open tag.
     NoTagToClose,
-    /// Trying to close a previous tag which does not match, like "<red>...</blue".
+    /// Trying to close a previous tag which does not match, like `<red>...</blue>`.
     MismatchCloseTag(String, String),
-    /// Only one argument is allowed for the [`cstr!()`] and ['`untagged!()`] macros.
+    /// Only one argument is allowed for the `cstr!()` and `untagged!()` macros.
     #[cfg(not(feature = "terminfo"))]
     TooManyArgs,
-    /// Only one argument is allowed for the ['`untagged!()`] macro.
+    /// Only one argument is allowed for the '`untagged!()` macro.
     #[cfg(feature = "terminfo")]
     TooManyArgs,
 }

@@ -20,6 +20,12 @@ mod untagged;
 
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
+use syn::{
+    parse::{Parse, ParseStream},
+    parse_macro_input,
+    token::Comma,
+    Expr,
+};
 
 /// The same as `format!()`, but parses color tags.
 ///
@@ -33,14 +39,14 @@ use quote::{quote, ToTokens};
 #[proc_macro]
 #[cfg(not(feature = "terminfo"))]
 pub fn cformat(input: TokenStream) -> TokenStream {
-    get_macro("format", input)
+    get_macro("format", input, false)
 }
 
 /// The same as `format!()`, but parses color tags.
 #[proc_macro]
 #[cfg(feature = "terminfo")]
 pub fn cformat(input: TokenStream) -> TokenStream {
-    get_macro("format", input)
+    get_macro("format", input, false)
 }
 
 /// The same as `print!()`, but parses color tags.
@@ -54,14 +60,35 @@ pub fn cformat(input: TokenStream) -> TokenStream {
 #[proc_macro]
 #[cfg(not(feature = "terminfo"))]
 pub fn cprint(input: TokenStream) -> TokenStream {
-    get_macro("print", input)
+    get_macro("print", input, false)
 }
 
 /// The same as `print!()`, but parses color tags.
 #[proc_macro]
 #[cfg(feature = "terminfo")]
 pub fn cprint(input: TokenStream) -> TokenStream {
-    get_macro("print", input)
+    get_macro("print", input, false)
+}
+
+/// The same as `eprint!()`, but parses color tags.
+///
+/// #### Example
+///
+/// ```
+/// # use color_print_proc_macro::ceprint;
+/// ceprint!("A <g>green</> word, {}", "placeholders are allowed");
+/// ```
+#[proc_macro]
+#[cfg(not(feature = "terminfo"))]
+pub fn ceprint(input: TokenStream) -> TokenStream {
+    get_macro("eprint", input, false)
+}
+
+/// The same as `eprint!()`, but parses color tags.
+#[proc_macro]
+#[cfg(feature = "terminfo")]
+pub fn ceprint(input: TokenStream) -> TokenStream {
+    get_macro("eprint", input, false)
 }
 
 /// The same as `println!()`, but parses color tags.
@@ -75,14 +102,63 @@ pub fn cprint(input: TokenStream) -> TokenStream {
 #[proc_macro]
 #[cfg(not(feature = "terminfo"))]
 pub fn cprintln(input: TokenStream) -> TokenStream {
-    get_macro("println", input)
+    get_macro("println", input, false)
 }
 
 /// The same as `println!()`, but parses color tags.
 #[proc_macro]
 #[cfg(feature = "terminfo")]
 pub fn cprintln(input: TokenStream) -> TokenStream {
-    get_macro("println", input)
+    get_macro("println", input, false)
+}
+
+/// The same as `eprintln!()`, but parses color tags.
+///
+/// #### Example
+///
+/// ```
+/// # use color_print_proc_macro::ceprintln;
+/// ceprintln!("A <g>green</> word, {}", "placeholders are allowed");
+/// ```
+#[proc_macro]
+#[cfg(not(feature = "terminfo"))]
+pub fn ceprintln(input: TokenStream) -> TokenStream {
+    get_macro("eprintln", input, false)
+}
+
+/// The same as `eprintln!()`, but parses color tags.
+#[proc_macro]
+#[cfg(feature = "terminfo")]
+pub fn ceprintln(input: TokenStream) -> TokenStream {
+    get_macro("eprintln", input, false)
+}
+
+/// The same as `write!()`, but parses color tags.
+#[proc_macro]
+#[cfg(not(feature = "terminfo"))]
+pub fn cwrite(input: TokenStream) -> TokenStream {
+    get_macro("write", input, true)
+}
+
+/// The same as `write!()`, but parses color tags.
+#[proc_macro]
+#[cfg(feature = "terminfo")]
+pub fn cwrite(input: TokenStream) -> TokenStream {
+    get_macro("write", input, true)
+}
+
+/// The same as `writeln!()`, but parses color tags.
+#[proc_macro]
+#[cfg(not(feature = "terminfo"))]
+pub fn cwriteln(input: TokenStream) -> TokenStream {
+    get_macro("writeln", input, true)
+}
+
+/// The same as `writeln!()`, but parses color tags.
+#[proc_macro]
+#[cfg(feature = "terminfo")]
+pub fn cwriteln(input: TokenStream) -> TokenStream {
+    get_macro("writeln", input, true)
 }
 
 /// Colorizes a string literal, without formatting the `format!`-like placeholders.
@@ -133,14 +209,38 @@ pub fn cstr(_: TokenStream) -> TokenStream {
     panic!("Macro cstr!() cannot be used with terminfo feature")
 }
 
-/// Renders a whole processed macro.
-fn get_macro(macro_name: &str, input: TokenStream) -> TokenStream {
-    #[cfg(not(feature = "terminfo"))]
-    let format_args = crate::ansi::get_format_args(input);
-    #[cfg(feature = "terminfo")]
-    let format_args = crate::terminfo::get_format_args(input);
+struct WriteInput {
+    dst: Expr,
+    rest: TokenStream,
+}
 
-    let format_args = format_args.unwrap_or_else(|err| err.to_token_stream());
+impl Parse for WriteInput {
+    fn parse(input: ParseStream) -> syn::parse::Result<Self> {
+        let dst: Expr = input.parse()?;
+        let _: Comma = input.parse()?;
+        let rest = input.parse_terminated(Expr::parse, Comma)?;
+        let rest = quote! { #rest }.into(); // Not sure how to do best?
+        Ok(Self { dst, rest })
+    }
+}
+
+/// Renders a whole processed macro.
+fn get_macro(macro_name: &str, input: TokenStream, is_write_macro: bool) -> TokenStream {
     let macro_name = util::ident(macro_name);
-    (quote! { #macro_name!(#format_args) }).into()
+    let fmt_args = |input_tail| {
+        #[cfg(not(feature = "terminfo"))]
+        let format_args = crate::ansi::get_format_args(input_tail);
+        #[cfg(feature = "terminfo")]
+        let format_args = crate::terminfo::get_format_args(input_tail);
+        format_args.unwrap_or_else(|err| err.to_token_stream())
+    };
+
+    if is_write_macro {
+        let WriteInput { dst, rest } = parse_macro_input!(input);
+        let format_args = fmt_args(rest);
+        (quote! { #macro_name!(#dst, #format_args) }).into()
+    } else {
+        let format_args = fmt_args(input);
+        (quote! { #macro_name!(#format_args) }).into()
+    }
 }

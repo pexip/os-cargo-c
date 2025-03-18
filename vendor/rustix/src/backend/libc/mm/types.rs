@@ -85,6 +85,7 @@ bitflags! {
             target_os = "emscripten",
             target_os = "fuchsia",
             target_os = "haiku",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
         )))]
@@ -97,6 +98,7 @@ bitflags! {
             solarish,
             target_os = "aix",
             target_os = "haiku",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
         )))]
@@ -112,6 +114,7 @@ bitflags! {
             target_os = "emscripten",
             target_os = "fuchsia",
             target_os = "haiku",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
         )))]
@@ -122,6 +125,7 @@ bitflags! {
             solarish,
             target_os = "aix",
             target_os = "haiku",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
         )))]
@@ -132,6 +136,7 @@ bitflags! {
             solarish,
             target_os = "aix",
             target_os = "haiku",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
         )))]
@@ -145,6 +150,7 @@ bitflags! {
             target_os = "emscripten",
             target_os = "fuchsia",
             target_os = "haiku",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
         )))]
@@ -158,6 +164,7 @@ bitflags! {
             target_os = "emscripten",
             target_os = "fuchsia",
             target_os = "haiku",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
         )))]
@@ -168,6 +175,7 @@ bitflags! {
             solarish,
             target_os = "aix",
             target_os = "haiku",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
         )))]
@@ -179,6 +187,7 @@ bitflags! {
         #[cfg(not(any(
             freebsdlike,
             target_os = "aix",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
         )))]
@@ -192,6 +201,7 @@ bitflags! {
             solarish,
             target_os = "aix",
             target_os = "haiku",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
         )))]
@@ -201,9 +211,8 @@ bitflags! {
             apple,
             solarish,
             target_os = "aix",
-            target_os = "dragonfly",
             target_os = "haiku",
-            target_os = "netbsd",
+            target_os = "hurd",
             target_os = "redox",
         )))]
         const STACK = bitcast!(c::MAP_STACK);
@@ -219,6 +228,7 @@ bitflags! {
             target_os = "emscripten",
             target_os = "fuchsia",
             target_os = "haiku",
+            target_os = "hurd",
             target_os = "nto",
             target_os = "redox",
             all(
@@ -230,6 +240,9 @@ bitflags! {
         /// `MAP_UNINITIALIZED`
         #[cfg(any())]
         const UNINITIALIZED = bitcast!(c::MAP_UNINITIALIZED);
+        /// `MAP_DROPPABLE`
+        #[cfg(linux_kernel)]
+        const DROPPABLE = bitcast!(c::MAP_DROPPABLE);
 
         /// <https://docs.rs/bitflags/*/bitflags/#externally-defined-flags>
         const _ = !0;
@@ -334,7 +347,12 @@ pub enum Advice {
     WillNeed = bitcast!(c::MADV_WILLNEED),
 
     /// `POSIX_MADV_DONTNEED`
-    #[cfg(not(any(target_os = "android", target_os = "emscripten", target_os = "haiku")))]
+    #[cfg(not(any(
+        target_os = "android",
+        target_os = "emscripten",
+        target_os = "haiku",
+        target_os = "hurd",
+    )))]
     DontNeed = bitcast!(c::POSIX_MADV_DONTNEED),
 
     /// `POSIX_MADV_DONTNEED`
@@ -461,15 +479,15 @@ bitflags! {
         /// created. `MCL_ONFAULT` must be used with either `MCL_CURRENT` or
         /// `MCL_FUTURE` or both.
         #[cfg(linux_kernel)]
-        const ONFAULT = bitcast!(libc::MCL_ONFAULT);
+        const ONFAULT = bitcast!(c::MCL_ONFAULT);
         /// Lock all pages which will become mapped into the address space of
         /// the process in the future. These could be, for instance, new pages
         /// required by a growing heap and stack as well as new memory-mapped
         /// files or shared memory regions.
-        const FUTURE = bitcast!(libc::MCL_FUTURE);
+        const FUTURE = bitcast!(c::MCL_FUTURE);
         /// Lock all pages which are currently mapped into the address space of
         /// the process.
-        const CURRENT = bitcast!(libc::MCL_CURRENT);
+        const CURRENT = bitcast!(c::MCL_CURRENT);
 
         /// <https://docs.rs/bitflags/*/bitflags/#externally-defined-flags>
         const _ = !0;

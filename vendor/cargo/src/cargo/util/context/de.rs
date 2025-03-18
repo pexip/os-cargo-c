@@ -16,9 +16,9 @@ pub(super) struct Deserializer<'gctx> {
     pub(super) key: ConfigKey,
     /// Whether or not this key part is allowed to be an inner table. For
     /// example, `profile.dev.build-override` needs to check if
-    /// CARGO_PROFILE_DEV_BUILD_OVERRIDE_ prefixes exist. But
-    /// CARGO_BUILD_TARGET should not check for prefixes because it would
-    /// collide with CARGO_BUILD_TARGET_DIR. See `ConfigMapAccess` for
+    /// `CARGO_PROFILE_DEV_BUILD_OVERRIDE_` prefixes exist. But
+    /// `CARGO_BUILD_TARGET` should not check for prefixes because it would
+    /// collide with `CARGO_BUILD_TARGET_DIR`. See `ConfigMapAccess` for
     /// details.
     pub(super) env_prefix_ok: bool,
 }
@@ -35,7 +35,7 @@ macro_rules! deserialize_method {
                 .ok_or_else(|| ConfigError::missing(&self.key))?;
             let Value { val, definition } = v;
             let res: Result<V::Value, ConfigError> = visitor.$visit(val);
-            res.map_err(|e| e.with_key_context(&self.key, definition))
+            res.map_err(|e| e.with_key_context(&self.key, Some(definition)))
         }
     };
 }
@@ -60,8 +60,14 @@ impl<'de, 'gctx> de::Deserializer<'de> for Deserializer<'gctx> {
                 CV::Boolean(b, def) => (visitor.visit_bool(b), def),
             };
             let (res, def) = res;
-            return res.map_err(|e| e.with_key_context(&self.key, def));
+            return res.map_err(|e| e.with_key_context(&self.key, Some(def)));
         }
+
+        // The effect here is the same as in `deserialize_option`.
+        if self.gctx.has_key(&self.key, self.env_prefix_ok)? {
+            return visitor.visit_some(self);
+        }
+
         Err(ConfigError::missing(&self.key))
     }
 
@@ -178,7 +184,7 @@ impl<'de, 'gctx> de::Deserializer<'de> for Deserializer<'gctx> {
         let Value { val, definition } = value;
         visitor
             .visit_enum(val.into_deserializer())
-            .map_err(|e: ConfigError| e.with_key_context(&self.key, definition))
+            .map_err(|e: ConfigError| e.with_key_context(&self.key, Some(definition)))
     }
 
     // These aren't really supported, yet.
@@ -265,7 +271,15 @@ impl<'gctx> ConfigMapAccess<'gctx> {
             let mut field_key = de.key.clone();
             field_key.push(field);
             for env_key in de.gctx.env_keys() {
-                if env_key.starts_with(field_key.as_env_key()) {
+                let Some(nested_field) = env_key.strip_prefix(field_key.as_env_key()) else {
+                    continue;
+                };
+                // This distinguishes fields that share the same prefix.
+                // For example, when env_key is UNSTABLE_GITOXIDE_FETCH
+                // and field_key is UNSTABLE_GIT, the field shouldn't be
+                // added because `unstable.gitoxide.fetch` doesn't
+                // belong to `unstable.git` struct.
+                if nested_field.is_empty() || nested_field.starts_with('_') {
                     fields.insert(KeyKind::Normal(field.to_string()));
                 }
             }
@@ -345,11 +359,25 @@ impl<'de, 'gctx> de::MapAccess<'de> for ConfigMapAccess<'gctx> {
             field.replace('-', "_").starts_with(&env_prefix)
         });
 
-        let result = seed.deserialize(Deserializer {
-            gctx: self.de.gctx,
-            key: self.de.key.clone(),
-            env_prefix_ok,
-        });
+        let result = seed
+            .deserialize(Deserializer {
+                gctx: self.de.gctx,
+                key: self.de.key.clone(),
+                env_prefix_ok,
+            })
+            .map_err(|e| {
+                if !e.is_missing_field() {
+                    return e;
+                }
+                e.with_key_context(
+                    &self.de.key,
+                    self.de
+                        .gctx
+                        .get_cv_with_env(&self.de.key)
+                        .ok()
+                        .and_then(|cv| cv.map(|cv| cv.get_definition().clone())),
+                )
+            });
         self.de.key.pop();
         result
     }
@@ -486,7 +514,7 @@ impl<'de, 'gctx> de::MapAccess<'de> for ValueDeserializer<'gctx> {
             if let Some(de) = &self.de {
                 return seed
                     .deserialize(de.clone())
-                    .map_err(|e| e.with_key_context(&de.key, self.definition.clone()));
+                    .map_err(|e| e.with_key_context(&de.key, Some(self.definition.clone())));
             } else {
                 return seed
                     .deserialize(self.str_value.as_ref().unwrap().clone().into_deserializer());

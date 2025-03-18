@@ -12,15 +12,15 @@ use crate::{
     remote::{
         fetch,
         fetch::{
+            refmap::Source,
             refs::update::{Mode, TypeChange},
-            RefLogMessage, Source,
+            RefLogMessage,
         },
     },
     Repository,
 };
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod update;
 
 /// Information about the update of a single reference, corresponding the respective entry in [`RefMap::mappings`][crate::remote::fetch::RefMap::mappings].
@@ -64,7 +64,7 @@ impl From<Mode> for Update {
 pub(crate) fn update(
     repo: &Repository,
     message: RefLogMessage,
-    mappings: &[fetch::Mapping],
+    mappings: &[fetch::refmap::Mapping],
     refspecs: &[gix_refspec::RefSpec],
     extra_refspecs: &[gix_refspec::RefSpec],
     fetch_tags: fetch::Tags,
@@ -80,7 +80,7 @@ pub(crate) fn update(
         .to_refspec()
         .filter(|_| matches!(fetch_tags, crate::remote::fetch::Tags::Included));
     for (remote, local, spec, is_implicit_tag) in mappings.iter().filter_map(
-        |fetch::Mapping {
+        |fetch::refmap::Mapping {
              remote,
              local,
              spec_index,
@@ -155,19 +155,19 @@ pub(crate) fn update(
                                                 .find_object(local_id)?
                                                 .try_into_commit()
                                                 .map_err(|_| ())
-                                                .and_then(|c| {
-                                                    c.committer().map(|a| a.time.seconds).map_err(|_| ())
-                                                }).and_then(|local_commit_time|
-                                                remote_id
-                                                    .to_owned()
-                                                    .ancestors(&repo.objects)
-                                                    .sorting(
-                                                        gix_traverse::commit::simple::Sorting::ByCommitTimeNewestFirstCutoffOlderThan {
-                                                            seconds: local_commit_time
-                                                        },
-                                                    )
-                                                    .map_err(|_| ())
-                                            );
+                                                .and_then(|c| c.committer().map(|a| a.time.seconds).map_err(|_| ()))
+                                                .and_then(|local_commit_time| {
+                                                    remote_id
+                                                        .to_owned()
+                                                        .ancestors(&repo.objects)
+                                                        .sorting(
+                                                            gix_traverse::commit::simple::Sorting::ByCommitTimeCutoff {
+                                                                order: Default::default(),
+                                                                seconds: local_commit_time,
+                                                            },
+                                                        )
+                                                        .map_err(|_| ())
+                                                });
                                             match ancestors {
                                                 Ok(mut ancestors) => {
                                                     ancestors.any(|cid| cid.map_or(false, |c| c.id == local_id))
@@ -201,7 +201,9 @@ pub(crate) fn update(
                                     PreviousValue::MustExistAndMatch(existing.target().into_owned()),
                                 )
                             }
-                            Err(crate::reference::peel::Error::ToId(gix_ref::peel::to_id::Error::Follow(_))) => {
+                            Err(crate::reference::peel::Error::ToId(gix_ref::peel::to_id::Error::FollowToObject(
+                                gix_ref::peel::to_object::Error::Follow(_),
+                            ))) => {
                                 // An unborn reference, always allow it to be changed to whatever the remote wants.
                                 (
                                     if existing.target().try_name().map(gix_ref::FullNameRef::as_bstr)
@@ -238,14 +240,14 @@ pub(crate) fn update(
                 let new = new_value_by_remote(repo, remote, mappings)?;
                 let type_change = match (&previous_value, &new) {
                     (
-                        PreviousValue::ExistingMustMatch(Target::Peeled(_))
-                        | PreviousValue::MustExistAndMatch(Target::Peeled(_)),
+                        PreviousValue::ExistingMustMatch(Target::Object(_))
+                        | PreviousValue::MustExistAndMatch(Target::Object(_)),
                         Target::Symbolic(_),
                     ) => Some(TypeChange::DirectToSymbolic),
                     (
                         PreviousValue::ExistingMustMatch(Target::Symbolic(_))
                         | PreviousValue::MustExistAndMatch(Target::Symbolic(_)),
-                        Target::Peeled(_),
+                        Target::Object(_),
                     ) => Some(TypeChange::SymbolicToDirect),
                     _ => None,
                 };
@@ -282,7 +284,7 @@ pub(crate) fn update(
             mode,
             type_change,
             edit_index,
-        })
+        });
     }
 
     for (update_index, edit_index) in edit_indices_to_validate {
@@ -349,7 +351,7 @@ fn update_needs_adjustment_as_edits_symbolic_target_is_missing(
     edits: &[RefEdit],
 ) -> bool {
     match edit.change.new_value().expect("here we need a symlink") {
-        TargetRef::Peeled(_) => unreachable!("BUG: we already know it's symbolic"),
+        TargetRef::Object(_) => unreachable!("BUG: we already know it's symbolic"),
         TargetRef::Symbolic(new_target_ref) => {
             match &edit.change {
                 Change::Update { expected, .. } => match expected {
@@ -387,7 +389,7 @@ fn update_needs_adjustment_as_edits_symbolic_target_is_missing(
 fn new_value_by_remote(
     repo: &Repository,
     remote: &Source,
-    mappings: &[fetch::Mapping],
+    mappings: &[fetch::refmap::Mapping],
 ) -> Result<Target, update::Error> {
     let remote_id = remote.as_id();
     Ok(
@@ -422,7 +424,7 @@ fn new_value_by_remote(
                                 Target::Symbolic(target.try_into()?)
                             } else {
                                 // born branches that we don't have in our refspecs we create peeled. That way they can be used.
-                                Target::Peeled(desired_id.to_owned())
+                                Target::Object(desired_id.to_owned())
                             }
                         }
                         // Unborn branches we create as such, with the location they point to on the remote which helps mirroring.
@@ -431,7 +433,7 @@ fn new_value_by_remote(
                 }
             }
         } else {
-            Target::Peeled(remote_id.expect("unborn case handled earlier").to_owned())
+            Target::Object(remote_id.expect("unborn case handled earlier").to_owned())
         },
     )
 }

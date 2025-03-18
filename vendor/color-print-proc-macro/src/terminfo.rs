@@ -8,7 +8,7 @@ use crate::error::SpanError;
 use crate::format_args::{get_args_and_format_string, parse_format_string, Node};
 use crate::util;
 
-/// Common code shared between the three public macros, terminfo implementation.
+/// Common code shared between the public macros, terminfo implementation.
 pub fn get_format_args(input: TokenStream) -> Result<TokenStream2, SpanError> {
     let (format_string_token, args) = get_args_and_format_string(input)?;
     let format_string = format_string_token.value();

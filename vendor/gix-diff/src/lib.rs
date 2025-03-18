@@ -37,6 +37,11 @@ pub struct Rewrites {
     /// If the limit would not be enough to test the entire set of combinations, the algorithm will trade in precision and not
     /// run the fuzzy version of identity tests at all. That way results are never partial.
     pub limit: usize,
+
+    /// If `true`, empty blobs will be tracked. If `false`, they do not participate in rename tracking.
+    ///
+    /// Leaving this off usually leads to better results as empty files don't have a unique-enough identity.
+    pub track_empty: bool,
 }
 
 /// Contains a [Tracker](rewrites::Tracker) to detect rewrites.
@@ -44,8 +49,14 @@ pub struct Rewrites {
 pub mod rewrites;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod tree;
+pub use tree::function::diff as tree;
+
+///
+#[cfg(feature = "blob")]
+pub mod tree_with_rewrites;
+#[cfg(feature = "blob")]
+pub use tree_with_rewrites::function::diff as tree_with_rewrites;
 
 ///
 #[cfg(feature = "blob")]

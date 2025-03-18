@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2020-2023 The orion Developers
+// Copyright (c) 2020-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,7 @@
 //! # Security:
 //! - The secret key should always be generated using a CSPRNG.
 //!   [`SecretKey::default()`] can be used for
-//! this; it will generate a [`SecretKey`] of 32 bytes.
+//!   this; it will generate a [`SecretKey`] of 32 bytes.
 //! - The required minimum length for a [`SecretKey`] is 32 bytes.
 //!
 //! # Example:

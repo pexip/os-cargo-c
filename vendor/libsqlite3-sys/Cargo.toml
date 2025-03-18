@@ -12,10 +12,14 @@
 [package]
 edition = "2021"
 name = "libsqlite3-sys"
-version = "0.28.0"
+version = "0.30.1"
 authors = ["The rusqlite developers"]
 build = "build.rs"
 links = "sqlite3"
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Native bindings to the libsqlite3 library"
 readme = "README.md"
 keywords = [
@@ -27,8 +31,12 @@ categories = ["external-ffi-bindings"]
 license = "MIT"
 repository = "https://github.com/rusqlite/rusqlite"
 
+[lib]
+name = "libsqlite3_sys"
+path = "src/lib.rs"
+
 [dependencies.openssl-sys]
-version = "0.9"
+version = "0.9.103"
 optional = true
 
 [build-dependencies.bindgen]
@@ -38,7 +46,7 @@ optional = true
 default-features = false
 
 [build-dependencies.cc]
-version = "1.0"
+version = "1.1.6"
 optional = true
 
 [build-dependencies.pkg-config]
@@ -46,16 +54,16 @@ version = "0.3.19"
 optional = true
 
 [build-dependencies.prettyplease]
-version = "0.2"
+version = "0.2.20"
 optional = true
 
 [build-dependencies.quote]
-version = "1"
+version = "1.0.36"
 optional = true
 default-features = false
 
 [build-dependencies.syn]
-version = "2.0"
+version = "2.0.72"
 features = [
     "full",
     "extra-traits",
@@ -64,7 +72,7 @@ features = [
 optional = true
 
 [build-dependencies.vcpkg]
-version = "0.2"
+version = "0.2.15"
 optional = true
 
 [features]

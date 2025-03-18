@@ -23,7 +23,7 @@ pub use errors::*;
 
 /// A platform maintaining state needed to interact with submodules, created by [`Repository::submodules()].
 pub(crate) struct SharedState<'repo> {
-    pub(crate) repo: &'repo Repository,
+    pub repo: &'repo Repository,
     pub(crate) modules: ModulesSnapshot,
     is_active: RefCell<Option<IsActiveState>>,
     index: RefCell<Option<IndexPersistedOrInMemory>>,
@@ -83,7 +83,7 @@ struct IsActiveState {
 }
 
 ///Access
-impl<'repo> Submodule<'repo> {
+impl Submodule<'_> {
     /// Return the submodule's name.
     pub fn name(&self) -> &BStr {
         self.name.as_ref()
@@ -125,7 +125,7 @@ impl<'repo> Submodule<'repo> {
                 .repo
                 .config
                 .resolved
-                .boolean_by_key("fetch.recurseSubmodules")
+                .boolean("fetch.recurseSubmodules")
                 .map(|res| crate::config::tree::Fetch::RECURSE_SUBMODULES.try_into_recurse_submodules(res))
                 .transpose()?,
         })
@@ -276,7 +276,6 @@ impl<'repo> Submodule<'repo> {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 #[cfg(feature = "status")]
 pub mod status {
     use super::{head_id, index_id, open, Status};
@@ -305,7 +304,7 @@ pub mod status {
         IndexWorktreeStatus(#[from] crate::status::index_worktree::Error),
     }
 
-    impl<'repo> Submodule<'repo> {
+    impl Submodule<'_> {
         /// Return the status of the submodule.
         ///
         /// Use `ignore` to control the portion of the submodule status to ignore. It can be obtained from

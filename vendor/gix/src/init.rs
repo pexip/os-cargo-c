@@ -1,7 +1,6 @@
 #![allow(clippy::result_large_err)]
 use std::{borrow::Cow, path::Path};
 
-use gix_macros::momo;
 use gix_ref::{
     store::WriteReflog,
     transaction::{PreviousValue, RefEdit},
@@ -41,7 +40,6 @@ impl ThreadSafeRepository {
     ///
     /// Fails without action if there is already a `.git` repository inside of `directory`, but
     /// won't mind if the `directory` otherwise is non-empty.
-    #[momo]
     pub fn init(
         directory: impl AsRef<Path>,
         kind: crate::create::Kind,
@@ -58,7 +56,6 @@ impl ThreadSafeRepository {
     ///
     /// Instead of naming the default branch `master`, we name it `main` unless configured explicitly using the `init.defaultBranch`
     /// configuration key.
-    #[momo]
     pub fn init_opts(
         directory: impl AsRef<Path>,
         kind: crate::create::Kind,
@@ -75,7 +72,7 @@ impl ThreadSafeRepository {
         let branch_name = repo
             .config
             .resolved
-            .string("init", None, Init::DEFAULT_BRANCH.name)
+            .string(Init::DEFAULT_BRANCH)
             .unwrap_or_else(|| Cow::Borrowed(DEFAULT_BRANCH_NAME.into()));
         if branch_name.as_ref() != DEFAULT_BRANCH_NAME {
             let sym_ref: FullName =

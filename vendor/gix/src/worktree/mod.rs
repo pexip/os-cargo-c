@@ -22,6 +22,7 @@ pub type Index = gix_fs::SharedFileSnapshot<gix_index::File>;
 
 /// A type to represent an index which either was loaded from disk as it was persisted there, or created on the fly in memory.
 #[cfg(feature = "index")]
+#[allow(clippy::large_enum_variant)]
 pub enum IndexPersistedOrInMemory {
     /// The index as loaded from disk, and shared across clones of the owning `Repository`.
     Persisted(Index),
@@ -108,7 +109,6 @@ pub(crate) fn id(git_dir: &std::path::Path, has_common_dir: bool) -> Option<&BSt
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod proxy;
 
 ///
@@ -128,7 +128,7 @@ pub mod open_index {
         IndexCorrupt(#[from] gix_index::file::verify::Error),
     }
 
-    impl<'repo> crate::Worktree<'repo> {
+    impl crate::Worktree<'_> {
         /// A shortcut to [`crate::Repository::open_index()`].
         pub fn open_index(&self) -> Result<gix_index::File, Error> {
             self.parent.open_index()
@@ -156,7 +156,7 @@ pub mod excludes {
         CreateCache(#[from] crate::config::exclude_stack::Error),
     }
 
-    impl<'repo> crate::Worktree<'repo> {
+    impl crate::Worktree<'_> {
         /// Configure a file-system cache checking if files below the repository are excluded.
         ///
         /// This takes into consideration all the usual repository configuration, namely:
@@ -259,7 +259,7 @@ pub mod pathspec {
                 .parent
                 .config
                 .resolved
-                .boolean_by_key("gitoxide.pathspec.inheritIgnoreCase")
+                .boolean("gitoxide.pathspec.inheritIgnoreCase")
                 .map(|res| {
                     gitoxide::Pathspec::INHERIT_IGNORE_CASE
                         .enrich_error(res)

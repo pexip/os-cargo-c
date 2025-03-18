@@ -22,6 +22,10 @@ pub enum Type {
     Arch,
     /// Artix Linux (<https://en.wikipedia.org/wiki/Artix_Linux>).
     Artix,
+    /// Bluefin (<https://projectbluefin.io>).
+    Bluefin,
+    /// CachyOS (<https://en.wikipedia.org/wiki/Arch_Linux#Derivatives>).
+    CachyOS,
     /// CentOS (<https://en.wikipedia.org/wiki/CentOS>).
     CentOS,
     /// Debian (<https://en.wikipedia.org/wiki/Debian>).
@@ -64,6 +68,8 @@ pub enum Type {
     NetBSD,
     /// NixOS (<https://en.wikipedia.org/wiki/NixOS>).
     NixOS,
+    /// Nobara (<https://nobaraproject.org/>).
+    Nobara,
     /// OpenBSD (<https://en.wikipedia.org/wiki/OpenBSD>).
     OpenBSD,
     /// OpenCloudOS (<https://www.opencloudos.org>).
@@ -94,6 +100,8 @@ pub enum Type {
     Ubuntu,
     /// Ultramarine (<https://ultramarine-linux.org/>).
     Ultramarine,
+    /// Uos (<https://www.chinauos.com/>).
+    Uos,
     /// Void Linux (<https://en.wikipedia.org/wiki/Void_Linux>).
     Void,
     /// Unknown operating system.
@@ -116,6 +124,8 @@ impl Display for Type {
             Type::AlmaLinux => write!(f, "AlmaLinux"),
             Type::Amazon => write!(f, "Amazon Linux AMI"),
             Type::Arch => write!(f, "Arch Linux"),
+            Type::Bluefin => write!(f, "Bluefin"),
+            Type::CachyOS => write!(f, "CachyOS Linux"),
             Type::Artix => write!(f, "Artix Linux"),
             Type::DragonFly => write!(f, "DragonFly BSD"),
             Type::Garuda => write!(f, "Garuda Linux"),
@@ -125,6 +135,7 @@ impl Display for Type {
             Type::Macos => write!(f, "Mac OS"),
             Type::MidnightBSD => write!(f, "Midnight BSD"),
             Type::Mint => write!(f, "Linux Mint"),
+            Type::Nobara => write!(f, "Nobara Linux"),
             Type::openEuler => write!(f, "EulerOS"),
             Type::OracleLinux => write!(f, "Oracle Linux"),
             Type::Pop => write!(f, "Pop!_OS"),
@@ -134,6 +145,7 @@ impl Display for Type {
             Type::RockyLinux => write!(f, "Rocky Linux"),
             Type::SUSE => write!(f, "SUSE Linux Enterprise Server"),
             Type::Ultramarine => write!(f, "Ultramarine Linux"),
+            Type::Uos => write!(f, "UOS"),
             Type::Void => write!(f, "Void Linux"),
             _ => write!(f, "{self:?}"),
         }
@@ -160,6 +172,8 @@ mod tests {
             (Type::Android, "Android"),
             (Type::Arch, "Arch Linux"),
             (Type::Artix, "Artix Linux"),
+            (Type::Bluefin, "Bluefin"),
+            (Type::CachyOS, "CachyOS Linux"),
             (Type::CentOS, "CentOS"),
             (Type::Debian, "Debian"),
             (Type::DragonFly, "DragonFly BSD"),
@@ -181,6 +195,7 @@ mod tests {
             (Type::Mint, "Linux Mint"),
             (Type::NetBSD, "NetBSD"),
             (Type::NixOS, "NixOS"),
+            (Type::Nobara, "Nobara Linux"),
             (Type::OpenCloudOS, "OpenCloudOS"),
             (Type::OpenBSD, "OpenBSD"),
             (Type::openEuler, "EulerOS"),
@@ -197,6 +212,7 @@ mod tests {
             (Type::Ubuntu, "Ubuntu"),
             (Type::Ultramarine, "Ultramarine Linux"),
             (Type::Unknown, "Unknown"),
+            (Type::Uos, "UOS"),
             (Type::Void, "Void Linux"),
             (Type::Windows, "Windows"),
         ];

@@ -6,7 +6,6 @@ use std::path::PathBuf;
 mod options;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod iter;
 
 /// An iterator for entries in a directory walk.
@@ -54,6 +53,8 @@ pub enum Error {
     Prefix(#[from] gix_path::realpath::Error),
     #[error(transparent)]
     FilesystemOptions(#[from] config::boolean::Error),
+    #[error("Could not list worktrees to assure they are no candidates for deletion")]
+    ListWorktrees(#[from] std::io::Error),
 }
 
 /// The outcome of the [dirwalk()](crate::Repository::dirwalk).

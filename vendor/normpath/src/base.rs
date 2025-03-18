@@ -18,8 +18,19 @@ use std::path::PathBuf;
 use super::error::MissingPrefixBufError;
 use super::error::MissingPrefixError;
 use super::error::ParentError;
-use super::normalize;
+use super::imp;
 use super::PathExt;
+
+fn cow_path_into_base_path(path: Cow<'_, Path>) -> Cow<'_, BasePath> {
+    debug_assert!(imp::is_base(&path));
+
+    match path {
+        Cow::Borrowed(path) => {
+            Cow::Borrowed(BasePath::from_inner(path.as_os_str()))
+        }
+        Cow::Owned(path) => Cow::Owned(BasePathBuf(path)),
+    }
+}
 
 /// A borrowed path that has a [prefix] on Windows.
 ///
@@ -81,7 +92,7 @@ impl BasePath {
         match path {
             Cow::Borrowed(path) => Self::try_new(path)
                 .map(Cow::Borrowed)
-                .or_else(|_| normalize::to_base(path).map(Cow::Owned)),
+                .or_else(|_| imp::to_base(path).map(Cow::Owned)),
             Cow::Owned(path) => BasePathBuf::new(path).map(Cow::Owned),
         }
     }
@@ -117,7 +128,7 @@ impl BasePath {
         P: AsRef<Path> + ?Sized,
     {
         let path = path.as_ref();
-        if normalize::is_base(path) {
+        if imp::is_base(path) {
             Ok(Self::from_inner(path.as_os_str()))
         } else {
             Err(MissingPrefixError(()))
@@ -142,7 +153,7 @@ impl BasePath {
     #[inline]
     pub fn canonicalize(&self) -> io::Result<BasePathBuf> {
         self.as_path().canonicalize().map(|base| {
-            debug_assert!(normalize::is_base(&base));
+            debug_assert!(imp::is_base(&base));
             BasePathBuf(base)
         })
     }
@@ -168,6 +179,12 @@ impl BasePath {
     #[must_use]
     pub fn exists(&self) -> bool {
         self.as_path().exists()
+    }
+
+    /// Equivalent to [`PathExt::expand`].
+    #[inline]
+    pub fn expand(&self) -> io::Result<Cow<'_, Self>> {
+        self.as_path().expand().map(cow_path_into_base_path)
     }
 
     /// Equivalent to [`Path::extension`].
@@ -390,6 +407,12 @@ impl BasePath {
         self.as_path().read_link()
     }
 
+    /// Equivalent to [`PathExt::shorten`].
+    #[inline]
+    pub fn shorten(&self) -> io::Result<Cow<'_, Self>> {
+        self.as_path().shorten().map(cow_path_into_base_path)
+    }
+
     /// Equivalent to [`Path::starts_with`].
     #[inline]
     #[must_use]
@@ -511,7 +534,7 @@ impl BasePathBuf {
     where
         P: Into<PathBuf>,
     {
-        Self::try_new(path).or_else(|x| normalize::to_base(&x.0))
+        Self::try_new(path).or_else(|x| imp::to_base(&x.0))
     }
 
     /// Equivalent to [`BasePath::try_new`] but returns an owned path.
@@ -539,7 +562,7 @@ impl BasePathBuf {
         P: Into<PathBuf>,
     {
         let path = path.into();
-        if normalize::is_base(&path) {
+        if imp::is_base(&path) {
             Ok(Self(path))
         } else {
             Err(MissingPrefixBufError(path))
@@ -629,7 +652,7 @@ impl BasePathBuf {
     where
         P: AsRef<Path>,
     {
-        normalize::push(self, path.as_ref());
+        imp::push(self, path.as_ref());
     }
 }
 

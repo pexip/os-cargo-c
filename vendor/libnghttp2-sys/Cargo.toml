@@ -11,9 +11,15 @@
 
 [package]
 name = "libnghttp2-sys"
-version = "0.1.10+1.61.0"
+version = "0.1.11+1.64.0"
 authors = ["Alex Crichton <alex@alexcrichton.com>"]
+build = "build.rs"
 links = "nghttp2"
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = """
 FFI bindings for libnghttp2 (nghttp2)
 """
@@ -23,7 +29,13 @@ license = "MIT/Apache-2.0"
 repository = "https://github.com/alexcrichton/nghttp2-rs"
 
 [lib]
+name = "libnghttp2_sys"
+path = "src/lib.rs"
 doctest = false
+
+[[example]]
+name = "smoke"
+path = "examples/smoke.rs"
 
 [dependencies.libc]
 version = "0.2"

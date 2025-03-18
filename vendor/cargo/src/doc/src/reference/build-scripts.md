@@ -77,13 +77,6 @@ Build scripts communicate with Cargo by printing to stdout. Cargo will
 interpret each line that starts with `cargo::` as an instruction that will
 influence compilation of the package. All other lines are ignored.
 
-> **Note:** The old invocation prefix `cargo:` (one colon only) is deprecated
-> and won't get any new features. To migrate, use two-colons prefix `cargo::`,
-> which was added in Rust 1.77. If you were using `cargo:KEY=VALUE` for
-> arbitrary links manifest key-value pairs, it is encouraged to switch to
-> `cargo::metadata=KEY=VALUE`. Stick to `cargo:` only if the support of Rust
-> version older than 1.77 is required.
-
 > The order of `cargo::` instructions printed by the build script *may*
 > affect the order of arguments that `cargo` passes to `rustc`. In turn, the
 > order of arguments passed to `rustc` may affect the order of arguments passed
@@ -130,13 +123,19 @@ one detailed below.
   compiler.
 * [`cargo::rustc-cfg=KEY[="VALUE"]`](#rustc-cfg) --- Enables compile-time `cfg`
   settings.
+* [`cargo::rustc-check-cfg=CHECK_CFG`](#rustc-check-cfg) -- Register custom `cfg`s as
+  expected for compile-time checking of configs. 
 * [`cargo::rustc-env=VAR=VALUE`](#rustc-env) --- Sets an environment variable.
 * [`cargo::rustc-cdylib-link-arg=FLAG`](#rustc-cdylib-link-arg) --- Passes custom
   flags to a linker for cdylib crates.
+- [`cargo::error=MESSAGE`](#cargo-error) --- Displays an error on the terminal.
 * [`cargo::warning=MESSAGE`](#cargo-warning) --- Displays a warning on the
   terminal.
 * [`cargo::metadata=KEY=VALUE`](#the-links-manifest-key) --- Metadata, used by `links`
   scripts.
+
+> **MSRV:** 1.77 is required for `cargo::KEY=VALUE` syntax.
+> To support older versions, use the `cargo:KEY=VALUE` syntax.
 
 ### `cargo::rustc-link-arg=FLAG` {#rustc-link-arg}
 
@@ -170,7 +169,7 @@ native library using [FFI].
 
 The `LIB` string is passed directly to rustc, so it supports any syntax that
 `-l` does. \
-Currently the full supported syntax for `LIB` is `[KIND[:MODIFIERS]=]NAME[:RENAME]`.
+Currently the fully supported syntax for `LIB` is `[KIND[:MODIFIERS]=]NAME[:RENAME]`.
 
 The `-l` flag is only passed to the library target of the package, unless
 there is no library target, in which case it is passed to all targets. This is
@@ -233,7 +232,10 @@ equivalent to using [`rustc-link-lib`](#rustc-link-lib) and
 
 The `rustc-cfg` instruction tells Cargo to pass the given value to the
 [`--cfg` flag][option-cfg] to the compiler. This may be used for compile-time
-detection of features to enable [conditional compilation].
+detection of features to enable [conditional compilation]. Custom cfgs
+must either be expected using the [`cargo::rustc-check-cfg`](#rustc-check-cfg)
+instruction or usage will need to allow the [`unexpected_cfgs`][unexpected-cfgs]
+lint to avoid unexpected cfgs warnings.
 
 Note that this does *not* affect Cargo's dependency resolution. This cannot be
 used to enable an optional dependency, or enable other Cargo features.
@@ -249,6 +251,41 @@ identifier, the value should be a string.
 [cargo features]: features.md
 [conditional compilation]: ../../reference/conditional-compilation.md
 [option-cfg]: ../../rustc/command-line-arguments.md#option-cfg
+[unexpected-cfgs]: ../../rustc/lints/listing/warn-by-default.md#unexpected-cfgs
+
+### `cargo::rustc-check-cfg=CHECK_CFG` {#rustc-check-cfg}
+
+Add to the list of expected config names and values that is used when checking
+the _reachable_ cfg expressions with the [`unexpected_cfgs`][unexpected-cfgs] lint.
+
+The syntax of `CHECK_CFG` mirrors the `rustc` [`--check-cfg` flag][option-check-cfg], see
+[Checking conditional configurations][checking-conditional-configurations] for more details.
+
+The instruction can be used like this:
+
+```rust,no_run
+// build.rs
+println!("cargo::rustc-check-cfg=cfg(foo, values(\"bar\"))");
+if foo_bar_condition {
+    println!("cargo::rustc-cfg=foo=\"bar\"");
+}
+```
+
+Note that all possible cfgs should be defined, regardless of which cfgs are
+currently enabled. This includes all possible values of a given cfg name.
+
+It is recommended to group the `cargo::rustc-check-cfg` and
+[`cargo::rustc-cfg`][option-cfg] instructions as closely as possible in order to
+avoid typos, missing check-cfg, stale cfgs...
+
+See also the
+[conditional compilation][conditional-compilation-example] example.
+
+> **MSRV:** Respected as of 1.80
+
+[checking-conditional-configurations]: ../../rustc/check-cfg.html
+[option-check-cfg]: ../../rustc/command-line-arguments.md#option-check-cfg
+[conditional-compilation-example]: build-script-examples.md#conditional-compilation
 
 ### `cargo::rustc-env=VAR=VALUE` {#rustc-env}
 
@@ -277,13 +314,27 @@ link-arg=FLAG` option][link-arg] to the compiler, but only when building a
 `cdylib` library target. Its usage is highly platform specific. It is useful
 to set the shared library version or the runtime-path.
 
+### `cargo::error=MESSAGE` {#cargo-error}
+
+The `error` instruction tells Cargo to display an error after the build script
+has finished running, and then fail the build.
+
+ > Note: Build script libraries should carefully consider if they want to
+ > use `cargo::error` versus returning a `Result`. It may be better to return
+ > a `Result`, and allow the caller to decide if the error is fatal or not.
+ > The caller can then decide whether or not to display the `Err` variant
+ > using `cargo::error`.
+
+> **MSRV:** Respected as of 1.84
+
 ### `cargo::warning=MESSAGE` {#cargo-warning}
 
 The `warning` instruction tells Cargo to display a warning after the build
 script has finished running. Warnings are only shown for `path` dependencies
 (that is, those you're working on locally), so for example warnings printed
-out in [crates.io] crates are not emitted by default. The `-vv` "very verbose"
-flag may be used to have Cargo display warnings for all crates.
+out in [crates.io] crates are not emitted by default, unless the build fails.
+The `-vv` "very verbose" flag may be used to have Cargo display warnings for
+all crates.
 
 ## Build Dependencies
 
@@ -381,14 +432,18 @@ key-value pairs. This metadata is set with the `cargo::metadata=KEY=VALUE`
 instruction.
 
 The metadata is passed to the build scripts of **dependent** packages. For
-example, if the package `bar` depends on `foo`, then if `foo` generates
-`key=value` as part of its build script metadata, then the build script of
-`bar` will have the environment variables `DEP_FOO_KEY=value`. See the ["Using
-another `sys` crate"][using-another-sys] for an example of how this can be
-used.
+example, if the package `foo` depends on `bar`, which links `baz`, then if 
+`bar` generates `key=value` as part of its build script metadata, then the
+build script of `foo` will have the environment variables `DEP_BAZ_KEY=value`
+(note that the value of the `links` key is used).
+See the ["Using another `sys` crate"][using-another-sys] for an example of 
+how this can be used.
 
 Note that metadata is only passed to immediate dependents, not transitive
 dependents.
+
+> **MSRV:** 1.77 is required for `cargo::metadata=KEY=VALUE`.
+> To support older versions, use `cargo:KEY=VAUE` (unsupported directives are assumed to be metadata keys).
 
 [using-another-sys]: build-script-examples.md#using-another-sys-crate
 

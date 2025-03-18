@@ -99,6 +99,8 @@ static DISTRIBUTIONS: [ReleaseInfo; 6] = [
                     "arch" => Some(Type::Arch),
                     "archarm" => Some(Type::Arch),
                     "artix" => Some(Type::Artix),
+                    "bluefin" => Some(Type::Bluefin),
+                    "cachyos" => Some(Type::CachyOS),
                     "centos" => Some(Type::CentOS),
                     //"clear-linux-os" => ClearLinuxOS
                     //"clearos" => ClearOS
@@ -117,11 +119,14 @@ static DISTRIBUTIONS: [ReleaseInfo; 6] = [
                     "mariner" => Some(Type::Mariner),
                     //"nexus" => Nexus
                     "nixos" => Some(Type::NixOS),
+                    "nobara" => Some(Type::Nobara),
+                    "Uos" => Some(Type::Uos),
                     "opencloudos" => Some(Type::OpenCloudOS),
                     "openEuler" => Some(Type::openEuler),
                     "ol" => Some(Type::OracleLinux),
                     "opensuse" => Some(Type::openSUSE),
                     "opensuse-leap" => Some(Type::openSUSE),
+                    "opensuse-microos" => Some(Type::openSUSE),
                     "opensuse-tumbleweed" => Some(Type::openSUSE),
                     //"rancheros" => RancherOS
                     //"raspbian" => Raspbian
@@ -301,6 +306,17 @@ mod tests {
     }
 
     #[test]
+    fn bluefin_os_release() {
+        let root = "src/linux/tests/Bluefin";
+
+        let info = retrieve(&DISTRIBUTIONS, root).unwrap();
+        assert_eq!(info.os_type(), Type::Bluefin);
+        assert_eq!(info.version, Version::Semantic(41, 0, 0));
+        assert_eq!(info.edition, None);
+        assert_eq!(info.codename, None);
+    }
+
+    #[test]
     fn centos_7_os_release() {
         let root = "src/linux/tests/CentOS_7";
 
@@ -453,6 +469,28 @@ mod tests {
             info.version,
             Version::Custom("21.05pre275822.916ee862e87".to_string())
         );
+        assert_eq!(info.edition, None);
+        assert_eq!(info.codename, None);
+    }
+
+    #[test]
+    fn nobara_os_release() {
+        let root = "src/linux/tests/Nobara";
+
+        let info = retrieve(&DISTRIBUTIONS, root).unwrap();
+        assert_eq!(info.os_type(), Type::Nobara);
+        assert_eq!(info.version, Version::Semantic(39, 0, 0));
+        assert_eq!(info.edition, None);
+        assert_eq!(info.codename, None);
+    }
+
+    #[test]
+    fn uos_os_release() {
+        let root = "src/linux/tests/Uos";
+
+        let info = retrieve(&DISTRIBUTIONS, root).unwrap();
+        assert_eq!(info.os_type(), Type::Uos);
+        assert_eq!(info.version, Version::Semantic(20, 0, 0));
         assert_eq!(info.edition, None);
         assert_eq!(info.codename, None);
     }
@@ -630,6 +668,17 @@ mod tests {
 
         let info = retrieve(&DISTRIBUTIONS, root).unwrap();
         assert_eq!(info.os_type(), Type::Void);
+        assert_eq!(info.version, Version::Unknown);
+        assert_eq!(info.edition, None);
+        assert_eq!(info.codename, None);
+    }
+
+    #[test]
+    fn cachy_os_release() {
+        let root = "src/linux/tests/CachyOS";
+
+        let info = retrieve(&DISTRIBUTIONS, root).unwrap();
+        assert_eq!(info.os_type(), Type::CachyOS);
         assert_eq!(info.version, Version::Unknown);
         assert_eq!(info.edition, None);
         assert_eq!(info.codename, None);

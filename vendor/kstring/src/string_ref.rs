@@ -141,7 +141,7 @@ impl<'s> Ord for KStringRef<'s> {
 impl<'s> PartialOrd for KStringRef<'s> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.as_str().partial_cmp(other.as_str())
+        Some(self.cmp(other))
     }
 }
 
@@ -183,7 +183,7 @@ impl<'s> AsRef<[u8]> for KStringRef<'s> {
 impl<'s> AsRef<std::ffi::OsStr> for KStringRef<'s> {
     #[inline]
     fn as_ref(&self) -> &std::ffi::OsStr {
-        (&**self).as_ref()
+        (**self).as_ref()
     }
 }
 

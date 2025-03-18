@@ -32,6 +32,8 @@ mod tests {
             | Type::Amazon
             | Type::Arch
             | Type::Artix
+            | Type::Bluefin
+            | Type::CachyOS
             | Type::CentOS
             | Type::Debian
             | Type::EndeavourOS
@@ -44,6 +46,8 @@ mod tests {
             | Type::Manjaro
             | Type::Mariner
             | Type::NixOS
+            | Type::Nobara
+            | Type::Uos
             | Type::OpenCloudOS
             | Type::openEuler
             | Type::openSUSE

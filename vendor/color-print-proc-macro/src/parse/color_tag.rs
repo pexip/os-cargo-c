@@ -94,10 +94,9 @@ fn attr(input: Input<'_>) -> Result<'_, Change> {
     parser(input).map_err(|e| {
         match e {
             Err::Error(_) => {
-                let msg = if alphanumeric1::<&str, Error>(input).is_ok() {
-                    "Unknown color attribute"
-                } else {
-                    "Unable to parse this attribute"
+                let msg = match alphanumeric1::<&str, Error>(input) {
+                    Ok((_, attr)) => format!("Unknown color attribute: <{attr}>"),
+                    Err(_) => "Unable to parse this attribute".to_string(),
                 };
                 Err::Failure(Error::new(input, ErrorKind::Alpha, Some(ErrorDetail::new(input, msg))))
             }

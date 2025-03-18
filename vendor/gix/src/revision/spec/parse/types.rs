@@ -55,6 +55,11 @@ pub struct Options {
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum Error {
+    #[error("Could not peel '{}' to obtain its target", name)]
+    PeelToId {
+        name: gix_ref::FullName,
+        source: reference::peel::Error,
+    },
     #[error("The rev-spec is malformed and misses a ref name")]
     Malformed,
     #[error("Unborn heads do not have a reflog yet")]
@@ -72,8 +77,6 @@ pub enum Error {
         direction: remote::Direction,
         source: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
-    #[error("This feature will be implemented once {dependency}")]
-    Planned { dependency: &'static str },
     #[error("Reference {reference:?} does not have a reference log, cannot {action}")]
     MissingRefLog { reference: BString, action: &'static str },
     #[error("HEAD has {available} prior checkouts and checkout number {desired} is out of range")]
@@ -184,9 +187,11 @@ pub enum Error {
         next: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     },
     #[error(transparent)]
-    Traverse(#[from] gix_traverse::commit::simple::Error),
+    Traverse(#[from] crate::revision::walk::iter::Error),
     #[error(transparent)]
     Walk(#[from] crate::revision::walk::Error),
     #[error("Spec does not contain a single object id")]
     SingleNotFound,
+    #[error("Reflog does not contain any entries")]
+    EmptyReflog,
 }

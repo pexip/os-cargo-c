@@ -25,8 +25,11 @@ mod update {
     }
 
     fn repo(name: &str) -> gix::Repository {
-        let dir =
-            gix_testtools::scripted_fixture_read_only_with_args("make_fetch_repos.sh", [base_repo_path()]).unwrap();
+        let dir = gix_testtools::scripted_fixture_read_only_with_args_single_archive(
+            "make_fetch_repos.sh",
+            [base_repo_path()],
+        )
+        .unwrap();
         gix::open_opts(dir.join(name), restricted()).unwrap()
     }
     fn named_repo(name: &str) -> gix::Repository {
@@ -34,7 +37,7 @@ mod update {
         gix::open_opts(dir.join(name), restricted()).unwrap()
     }
     fn repo_rw(name: &str) -> (gix::Repository, gix_testtools::tempfile::TempDir) {
-        let dir = gix_testtools::scripted_fixture_writable_with_args(
+        let dir = gix_testtools::scripted_fixture_writable_with_args_single_archive(
             "make_fetch_repos.sh",
             [base_repo_path()],
             gix_testtools::Creation::ExecuteScript,
@@ -53,8 +56,11 @@ mod update {
         remote::{
             fetch,
             fetch::{
+                refmap::Mapping,
+                refmap::Source,
+                refmap::SpecIndex,
                 refs::{tests::restricted, update::TypeChange},
-                Mapping, RefLogMessage, Source, SpecIndex,
+                RefLogMessage,
             },
         },
     };
@@ -179,7 +185,7 @@ mod update {
                             new.id(),
                             remote_ref.target().id(),
                             "remote ref provides the id to set in the local reference"
-                        )
+                        );
                     }
                     _ => unreachable!("only updates"),
                 }
@@ -189,7 +195,7 @@ mod update {
 
     #[test]
     fn checked_out_branches_in_worktrees_are_rejected_with_additional_information() -> Result {
-        let root = gix_path::realpath(gix_testtools::scripted_fixture_read_only_with_args(
+        let root = gix_path::realpath(gix_testtools::scripted_fixture_read_only_with_args_single_archive(
             "make_fetch_repos.sh",
             [base_repo_path()],
         )?)?;
@@ -374,7 +380,7 @@ mod update {
             }]
         );
         assert_eq!(out.edits.len(), 1);
-        let target = Target::Peeled(hex_to_id("66f16e4e8baf5c77bb6d0484495bebea80e916ce"));
+        let target = Target::Object(hex_to_id("66f16e4e8baf5c77bb6d0484495bebea80e916ce"));
         assert_eq!(
             out.edits[0],
             RefEdit {
@@ -518,7 +524,7 @@ mod update {
                         expected: PreviousValue::MustExistAndMatch(Target::Symbolic(
                             "refs/heads/main".try_into().expect("valid"),
                         )),
-                        new: Target::Peeled(hex_to_id("f99771fe6a1b535783af3163eba95a927aae21d5")),
+                        new: Target::Object(hex_to_id("f99771fe6a1b535783af3163eba95a927aae21d5")),
                     },
                     name: "refs/heads/symbolic".try_into().expect("valid"),
                     deref: false,
@@ -540,7 +546,7 @@ mod update {
                             force_create_reflog: false,
                             message: "action: no update will be performed".into(),
                         },
-                        expected: PreviousValue::MustExistAndMatch(Target::Peeled(hex_to_id(
+                        expected: PreviousValue::MustExistAndMatch(Target::Object(hex_to_id(
                             "f99771fe6a1b535783af3163eba95a927aae21d5",
                         ))),
                         new: Target::Symbolic("refs/heads/main".try_into().expect("valid")),
@@ -907,7 +913,7 @@ mod update {
     fn mapping_from_spec(
         spec: &str,
         remote_repo: &gix::Repository,
-    ) -> (Vec<fetch::Mapping>, Vec<gix::refspec::RefSpec>) {
+    ) -> (Vec<fetch::refmap::Mapping>, Vec<gix::refspec::RefSpec>) {
         let spec = gix_refspec::parse(spec.into(), gix_refspec::parse::Operation::Fetch).unwrap();
         let group = gix_refspec::MatchGroup::from_fetch_specs(Some(spec));
         let references = remote_repo.references().unwrap();
@@ -917,13 +923,13 @@ mod update {
             .match_remotes(references.iter().map(remote_ref_to_item))
             .mappings
             .into_iter()
-            .map(|m| fetch::Mapping {
+            .map(|m| fetch::refmap::Mapping {
                 remote: m.item_index.map_or_else(
                     || match m.lhs {
-                        gix_refspec::match_group::SourceRef::ObjectId(id) => fetch::Source::ObjectId(id),
+                        gix_refspec::match_group::SourceRef::ObjectId(id) => fetch::refmap::Source::ObjectId(id),
                         _ => unreachable!("not a ref, must be id: {:?}", m),
                     },
-                    |idx| fetch::Source::Ref(references[idx].clone()),
+                    |idx| fetch::refmap::Source::Ref(references[idx].clone()),
                 ),
                 local: m.rhs.map(std::borrow::Cow::into_owned),
                 spec_index: SpecIndex::ExplicitInRemote(m.spec_index),
@@ -935,7 +941,7 @@ mod update {
     fn into_remote_ref(mut r: gix::Reference<'_>) -> gix_protocol::handshake::Ref {
         let full_ref_name = r.name().as_bstr().into();
         match r.target() {
-            TargetRef::Peeled(id) => gix_protocol::handshake::Ref::Direct {
+            TargetRef::Object(id) => gix_protocol::handshake::Ref::Direct {
                 full_ref_name,
                 object: id.into(),
             },

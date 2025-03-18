@@ -12,8 +12,13 @@
 [package]
 edition = "2018"
 name = "color-print"
-version = "0.3.6"
+version = "0.3.7"
 authors = ["Johann David <johann.david.dev@protonmail.com>"]
+build = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Colorize and stylize strings for terminal at compile-time, by using an HTML-like syntax"
 readme = "README.md"
 keywords = [
@@ -25,8 +30,12 @@ keywords = [
 license = "MIT OR Apache-2.0"
 repository = "https://gitlab.com/dajoha/color-print"
 
+[lib]
+name = "color_print"
+path = "src/lib.rs"
+
 [dependencies.color-print-proc-macro]
-version = "0.3.6"
+version = "0.3.7"
 
 [dependencies.lazy_static]
 version = "1.4"

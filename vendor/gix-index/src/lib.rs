@@ -10,36 +10,32 @@ use bstr::{BStr, ByteSlice};
 use std::{ops::Range, path::PathBuf};
 
 use filetime::FileTime;
+/// `gix_hash` is made available as it's part of the public API in various places.
 pub use gix_hash as hash;
+/// A re-export to allow calling [`State::from_tree()`].
+pub use gix_validate as validate;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod file;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod extension;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod entry;
 
 mod access;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod init;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod decode;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod verify;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod write;
 
 pub mod fs;
@@ -240,13 +236,4 @@ pub(crate) mod util {
         }
         data.split_at(pos).into()
     }
-}
-
-#[test]
-fn size_of_entry() {
-    assert_eq!(std::mem::size_of::<crate::Entry>(), 80);
-
-    // the reason we have our own time is half the size.
-    assert_eq!(std::mem::size_of::<crate::entry::stat::Time>(), 8);
-    assert_eq!(std::mem::size_of::<filetime::FileTime>(), 16);
 }

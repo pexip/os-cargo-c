@@ -26,8 +26,10 @@ pub struct Prepare {
     pub args: Vec<OsString>,
     /// environment variables to set in the spawned process.
     pub env: Vec<(OsString, OsString)>,
-    /// If `true`, we will use `sh` to execute the `command`.
+    /// If `true`, we will use `shell_program` or `sh` to execute the `command`.
     pub use_shell: bool,
+    /// The name or path to the shell program to use instead of `sh`.
+    pub shell_program: Option<OsString>,
     /// If `true` (default `true` on windows and `false` everywhere else)
     /// we will see if it's safe to manually invoke `command` after splitting
     /// its arguments as a shell would do.
@@ -103,6 +105,12 @@ mod prepare {
             self
         }
 
+        /// Set the name or path to the shell `program` to use, to avoid using the default shell which is `sh`.
+        pub fn with_shell_program(mut self, program: impl Into<OsString>) -> Self {
+            self.shell_program = Some(program.into());
+            self
+        }
+
         /// Unconditionally turn off using the shell when spawning the command.
         /// Note that not using the shell is the default so an effective use of this method
         /// is some time after [`with_shell()`][Prepare::with_shell()] was called.
@@ -123,8 +131,14 @@ mod prepare {
         /// Use a shell, but try to split arguments by hand if this can be safely done without a shell.
         ///
         /// If that's not the case, use a shell instead.
-        pub fn with_shell_allow_argument_splitting(mut self) -> Self {
+        pub fn with_shell_allow_manual_argument_splitting(mut self) -> Self {
             self.allow_manual_arg_splitting = true;
+            self.with_shell()
+        }
+
+        /// Use a shell, but prohibit splitting arguments by hand even if this could be safely done without a shell.
+        pub fn with_shell_disallow_manual_argument_splitting(mut self) -> Self {
+            self.allow_manual_arg_splitting = false;
             self.with_shell()
         }
 
@@ -199,7 +213,10 @@ mod prepare {
                         cmd
                     }
                     None => {
-                        let mut cmd = Command::new(if cfg!(windows) { "sh" } else { "/bin/sh" });
+                        let mut cmd = Command::new(
+                            prep.shell_program
+                                .unwrap_or(if cfg!(windows) { "sh" } else { "/bin/sh" }.into()),
+                        );
                         cmd.arg("-c");
                         if !prep.args.is_empty() {
                             if prep.command.to_str().map_or(true, |cmd| !cmd.contains("$@")) {
@@ -237,6 +254,13 @@ mod prepare {
             } else {
                 Command::new(prep.command)
             };
+            // We never want to have terminals pop-up on Windows if this runs from a GUI application.
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                cmd.creation_flags(CREATE_NO_WINDOW);
+            }
             cmd.stdin(prep.stdin)
                 .stdout(prep.stdout)
                 .stderr(prep.stderr)
@@ -330,7 +354,6 @@ pub fn extract_interpreter(executable: &Path) -> Option<shebang::Data> {
 }
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod shebang {
     use bstr::{BStr, ByteSlice};
     use std::ffi::OsString;
@@ -401,6 +424,8 @@ pub mod shebang {
 /// - `stdout` is captured for consumption by the caller
 /// - `stderr` is inherited to allow the command to provide context to the user
 ///
+/// On Windows, terminal Windows will be suppressed automatically.
+///
 /// ### Warning
 ///
 /// When using this method, be sure that the invoked program doesn't rely on the current working dir and/or
@@ -409,6 +434,7 @@ pub mod shebang {
 pub fn prepare(cmd: impl Into<OsString>) -> Prepare {
     Prepare {
         command: cmd.into(),
+        shell_program: None,
         context: None,
         stdin: std::process::Stdio::null(),
         stdout: std::process::Stdio::piped(),

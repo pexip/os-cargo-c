@@ -9,9 +9,8 @@ cargo\-package \[em] Assemble the local package into a distributable tarball
 \fBcargo package\fR [\fIoptions\fR]
 .SH "DESCRIPTION"
 This command will create a distributable, compressed \fB\&.crate\fR file with the
-source code of the package in the current directory. The resulting file will
-be stored in the \fBtarget/package\fR directory. This performs the following
-steps:
+source code of the package in the current directory. The resulting file will be
+stored in the \fBtarget/package\fR directory. This performs the following steps:
 .sp
 .RS 4
 \h'-04' 1.\h'+01'Load and check the current workspace, performing some basic checks.
@@ -43,8 +42,17 @@ packaged lock file if the \fB\-\-locked\fR flag is used.
 .sp
 .RS 4
 \h'-04'\(bu\h'+02'A \fB\&.cargo_vcs_info.json\fR file is included that contains information
-about the current VCS checkout hash if available (not included with
-\fB\-\-allow\-dirty\fR).
+about the current VCS checkout hash if available, as well as a flag if the
+worktree is dirty.
+.RE
+.sp
+.RS 4
+\h'-04'\(bu\h'+02'Symlinks are flattened to their target files.
+.RE
+.sp
+.RS 4
+\h'-04'\(bu\h'+02'Files and directories are included or excluded based on rules mentioned in
+\fIthe \f(BI[include]\fI and \f(BI[exclude]\fI fields\fR <https://doc.rust\-lang.org/cargo/reference/manifest.html#the\-exclude\-and\-include\-fields>\&.
 .RE
 .RE
 .sp
@@ -74,15 +82,26 @@ Will generate a \fB\&.cargo_vcs_info.json\fR in the following format
 .nf
 {
  "git": {
-   "sha1": "aac20b6e7e543e6dd4118b246c77225e3a3a1302"
+   "sha1": "aac20b6e7e543e6dd4118b246c77225e3a3a1302",
+   "dirty": true
  },
  "path_in_vcs": ""
 }
 .fi
 .RE
 .sp
+\fBdirty\fR indicates that the Git worktree was dirty when the package
+was built.
+.sp
 \fBpath_in_vcs\fR will be set to a repo\-relative path for packages
 in subdirectories of the version control repository.
+.sp
+The compatibility of this file is maintained under the same policy
+as the JSON output of \fBcargo\-metadata\fR(1).
+.sp
+Note that this file provides a best\-effort snapshot of the VCS information.
+However, the provenance of the package is not verified.
+There is no guarantee that the source code in the tarball matches the VCS information.
 .SH "OPTIONS"
 .SS "Package Options"
 .sp
@@ -106,6 +125,20 @@ or the license).
 \fB\-\-allow\-dirty\fR
 .RS 4
 Allow working directories with uncommitted VCS changes to be packaged.
+.RE
+.sp
+\fB\-\-index\fR \fIindex\fR
+.RS 4
+The URL of the registry index to use.
+.RE
+.sp
+\fB\-\-registry\fR \fIregistry\fR
+.RS 4
+Name of the registry to package for; see \fBcargo publish \-\-help\fR for more details
+about configuration of registry names. The packages will not be published
+to this registry, but if we are packaging multiple inter\-dependent crates,
+lock\-files will be generated under the assumption that dependencies will be
+published to this registry.
 .RE
 .SS "Package Selection"
 By default, when no package selection options are given, the packages selected
@@ -155,7 +188,7 @@ This may also be specified with the \fBbuild.target\fR
 .sp
 Note that specifying this flag makes Cargo run in a different mode where the
 target artifacts are placed in a separate directory. See the
-\fIbuild cache\fR <https://doc.rust\-lang.org/cargo/guide/build\-cache.html> documentation for more details.
+\fIbuild cache\fR <https://doc.rust\-lang.org/cargo/reference/build\-cache.html> documentation for more details.
 .RE
 .sp
 \fB\-\-target\-dir\fR \fIdirectory\fR
@@ -235,6 +268,20 @@ May also be specified with the \fBnet.offline\fR \fIconfig value\fR <https://doc
 \fB\-\-frozen\fR
 .RS 4
 Equivalent to specifying both \fB\-\-locked\fR and \fB\-\-offline\fR\&.
+.RE
+.sp
+\fB\-\-lockfile\-path\fR \fIPATH\fR
+.RS 4
+Changes the path of the lockfile from the default (\fB<workspace_root>/Cargo.lock\fR) to \fIPATH\fR\&. \fIPATH\fR must end with
+\fBCargo.lock\fR (e.g. \fB\-\-lockfile\-path /tmp/temporary\-lockfile/Cargo.lock\fR). Note that providing
+\fB\-\-lockfile\-path\fR will ignore existing lockfile at the default path, and instead will
+either use the lockfile from \fIPATH\fR, or write a new lockfile into the provided \fIPATH\fR if it doesn\[cq]t exist.
+This flag can be used to run most commands in read\-only directories, writing lockfile into the provided \fIPATH\fR\&.
+.sp
+This option is only available on the \fInightly
+channel\fR <https://doc.rust\-lang.org/book/appendix\-07\-nightly\-rust.html> and
+requires the \fB\-Z unstable\-options\fR flag to enable (see
+\fI#14421\fR <https://github.com/rust\-lang/cargo/issues/14421>).
 .RE
 .SS "Miscellaneous Options"
 .sp

@@ -12,14 +12,21 @@
 [package]
 edition = "2018"
 name = "color-print-proc-macro"
-version = "0.3.6"
+version = "0.3.7"
 authors = ["Johann David <johann.david.dev@protonmail.com>"]
+build = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Implementation for the package color-print"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 repository = "https://gitlab.com/dajoha/color-print"
 
 [lib]
+name = "color_print_proc_macro"
+path = "src/lib.rs"
 proc-macro = true
 
 [dependencies.nom]
@@ -33,6 +40,7 @@ version = "1.0"
 
 [dependencies.syn]
 version = "2.0"
+features = ["full"]
 
 [features]
 terminfo = []

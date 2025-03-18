@@ -6,25 +6,22 @@
     doc = ::document_features::document_features!()
 )]
 #![cfg_attr(all(doc, feature = "document-features"), feature(doc_cfg, doc_auto_cfg))]
-#![deny(missing_docs, rust_2018_idioms, unsafe_code)]
+#![deny(missing_docs, rust_2018_idioms)]
+#![forbid(unsafe_code)]
 
 pub use gix_glob as glob;
 use kstring::{KString, KStringRef};
 
 mod assignment;
 ///
-#[allow(clippy::empty_docs)]
 pub mod name;
 ///
-#[allow(clippy::empty_docs)]
 pub mod state;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod search;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod parse;
 
 /// Parse attribute assignments line by line from `bytes`, and fail the operation on error.

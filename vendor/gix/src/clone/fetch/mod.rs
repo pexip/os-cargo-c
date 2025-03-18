@@ -1,3 +1,5 @@
+use crate::bstr::BString;
+use crate::bstr::ByteSlice;
 use crate::clone::PrepareFetch;
 
 /// The error returned by [`PrepareFetch::fetch_only()`].
@@ -35,6 +37,13 @@ pub enum Error {
     },
     #[error("Failed to update HEAD with values from remote")]
     HeadUpdate(#[from] crate::reference::edit::Error),
+    #[error("The remote didn't have any ref that matched '{}'", wanted.as_ref().as_bstr())]
+    RefNameMissing { wanted: gix_ref::PartialName },
+    #[error("The remote has {} refs for '{}', try to use a specific name: {}", candidates.len(), wanted.as_ref().as_bstr(), candidates.iter().filter_map(|n| n.to_str().ok()).collect::<Vec<_>>().join(", "))]
+    RefNameAmbiguous {
+        wanted: gix_ref::PartialName,
+        candidates: Vec<BString>,
+    },
 }
 
 /// Modification
@@ -63,15 +72,6 @@ impl PrepareFetch {
         P: crate::NestedProgress,
         P::SubProgress: 'static,
     {
-        self.fetch_only_inner(&mut progress, should_interrupt).await
-    }
-
-    #[gix_protocol::maybe_async::maybe_async]
-    async fn fetch_only_inner(
-        &mut self,
-        progress: &mut dyn crate::DynNestedProgress,
-        should_interrupt: &std::sync::atomic::AtomicBool,
-    ) -> Result<(crate::Repository, crate::remote::fetch::Outcome), Error> {
         use crate::{bstr::ByteVec, remote, remote::fetch::RefLogMessage};
 
         let repo = self
@@ -90,19 +90,21 @@ impl PrepareFetch {
             None => repo
                 .config
                 .resolved
-                .string("clone", None, crate::config::tree::Clone::DEFAULT_REMOTE_NAME.name)
+                .string(crate::config::tree::Clone::DEFAULT_REMOTE_NAME)
                 .map(|n| crate::config::tree::Clone::DEFAULT_REMOTE_NAME.try_into_symbolic_name(n))
                 .transpose()?
                 .unwrap_or_else(|| "origin".into()),
         };
 
-        let mut remote = repo
-            .remote_at(self.url.clone())?
-            .with_refspecs(
-                Some(format!("+refs/heads/*:refs/remotes/{remote_name}/*").as_str()),
-                remote::Direction::Fetch,
-            )
-            .expect("valid static spec");
+        let mut remote = repo.remote_at(self.url.clone())?;
+        if remote.fetch_specs.is_empty() {
+            remote = remote
+                .with_refspecs(
+                    Some(format!("+refs/heads/*:refs/remotes/{remote_name}/*").as_str()),
+                    remote::Direction::Fetch,
+                )
+                .expect("valid static spec");
+        }
         let mut clone_fetch_tags = None;
         if let Some(f) = self.configure_remote.as_mut() {
             remote = f(remote).map_err(Error::RemoteConfiguration)?;
@@ -117,10 +119,11 @@ impl PrepareFetch {
             remote = remote.with_fetch_tags(fetch_tags);
         }
 
-        // Add HEAD after the remote was written to config, we need it to know what to checkout later, and assure
+        // Add HEAD after the remote was written to config, we need it to know what to check out later, and assure
         // the ref that HEAD points to is present no matter what.
+        let head_local_tracking_branch = format!("refs/remotes/{remote_name}/HEAD");
         let head_refspec = gix_refspec::parse(
-            format!("HEAD:refs/remotes/{remote_name}/HEAD").as_str().into(),
+            format!("HEAD:{head_local_tracking_branch}").as_str().into(),
             gix_refspec::parse::Operation::Fetch,
         )
         .expect("valid")
@@ -130,16 +133,55 @@ impl PrepareFetch {
             if let Some(f) = self.configure_connection.as_mut() {
                 f(&mut connection).map_err(Error::RemoteConnection)?;
             }
-            connection
-                .prepare_fetch(&mut *progress, {
-                    let mut opts = self.fetch_options.clone();
-                    if !opts.extra_refspecs.contains(&head_refspec) {
-                        opts.extra_refspecs.push(head_refspec)
-                    }
-                    opts
-                })
-                .await?
+            let mut fetch_opts = {
+                let mut opts = self.fetch_options.clone();
+                if !opts.extra_refspecs.contains(&head_refspec) {
+                    opts.extra_refspecs.push(head_refspec.clone());
+                }
+                if let Some(ref_name) = &self.ref_name {
+                    opts.extra_refspecs.push(
+                        gix_refspec::parse(ref_name.as_ref().as_bstr(), gix_refspec::parse::Operation::Fetch)
+                            .expect("partial names are valid refspecs")
+                            .to_owned(),
+                    );
+                }
+                opts
+            };
+            match connection.prepare_fetch(&mut progress, fetch_opts.clone()).await {
+                Ok(prepare) => prepare,
+                Err(remote::fetch::prepare::Error::RefMap(remote::ref_map::Error::InitRefMap(
+                    gix_protocol::fetch::refmap::init::Error::MappingValidation(err),
+                ))) if err.issues.len() == 1
+                    && fetch_opts.extra_refspecs.contains(&head_refspec)
+                    && matches!(
+                        err.issues.first(),
+                        Some(gix_refspec::match_group::validate::Issue::Conflict {
+                            destination_full_ref_name,
+                            ..
+                        }) if *destination_full_ref_name == head_local_tracking_branch
+                    ) =>
+                {
+                    let head_refspec_idx = fetch_opts
+                        .extra_refspecs
+                        .iter()
+                        .enumerate()
+                        .find_map(|(idx, spec)| (*spec == head_refspec).then_some(idx))
+                        .expect("it's contained");
+                    // On the very special occasion that we fail as there is a remote `refs/heads/HEAD` reference that clashes
+                    // with our implicit refspec, retry without it. Maybe this tells us that we shouldn't have that implicit
+                    // refspec, as git can do this without connecting twice.
+                    let connection = remote.connect(remote::Direction::Fetch).await?;
+                    fetch_opts.extra_refspecs.remove(head_refspec_idx);
+                    connection.prepare_fetch(&mut progress, fetch_opts).await?
+                }
+                Err(err) => return Err(err.into()),
+            }
         };
+
+        // Assure problems with custom branch names fail early, not after getting the pack or during negotiation.
+        if let Some(ref_name) = &self.ref_name {
+            util::find_custom_refname(pending_pack.ref_map(), ref_name)?;
+        }
         if pending_pack.ref_map().object_hash != repo.object_hash() {
             unimplemented!("configure repository to expect a different object hash as advertised by the server")
         }
@@ -154,15 +196,16 @@ impl PrepareFetch {
                 message: reflog_message.clone(),
             })
             .with_shallow(self.shallow.clone())
-            .receive_inner(progress, should_interrupt)
+            .receive(&mut progress, should_interrupt)
             .await?;
 
         util::append_config_to_repo_config(repo, config);
         util::update_head(
             repo,
-            &outcome.ref_map.remote_refs,
+            &outcome.ref_map,
             reflog_message.as_ref(),
             remote_name.as_ref(),
+            self.ref_name.as_ref(),
         )?;
 
         Ok((self.repo.take().expect("still present"), outcome))
@@ -180,7 +223,13 @@ impl PrepareFetch {
         P::SubProgress: 'static,
     {
         let (repo, fetch_outcome) = self.fetch_only(progress, should_interrupt)?;
-        Ok((crate::clone::PrepareCheckout { repo: repo.into() }, fetch_outcome))
+        Ok((
+            crate::clone::PrepareCheckout {
+                repo: repo.into(),
+                ref_name: self.ref_name.clone(),
+            },
+            fetch_outcome,
+        ))
     }
 }
 

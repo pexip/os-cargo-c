@@ -1,6 +1,6 @@
 // MIT License
 
-// Copyright (c) 2020-2023 The orion Developers
+// Copyright (c) 2020-2025 The orion Developers
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,9 +60,8 @@
 //!
 //! # Security:
 //! - It is critical for security that a given nonce is not re-used with a given
-//!   key. Should this happen,
-//! the security of all data that has been encrypted with that given key is
-//! compromised.
+//!   key. Should this happen, the security of all data that has been encrypted with
+//!   that given key is compromised.
 //! - To securely generate a strong key, use [`SecretKey::default()`].
 //! - The length of the `plaintext` is not hidden, only its contents.
 //!
@@ -166,7 +165,7 @@ pub mod streaming {
     //! - `plaintext`: The data to be encrypted.
     //! - `ciphertext`: The encrypted data with a Poly1305 tag and a [`StreamTag`] indicating its function.
     //! - `tag`: Indicates the type of message. The `tag` is a part of the output when encrypting. It
-    //! is encrypted and authenticated.
+    //!    is encrypted and authenticated.
     //!
     //! # Errors:
     //! An error will be returned if:

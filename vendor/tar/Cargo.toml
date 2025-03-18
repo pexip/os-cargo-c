@@ -12,9 +12,15 @@
 [package]
 edition = "2021"
 name = "tar"
-version = "0.4.41"
+version = "0.4.44"
 authors = ["Alex Crichton <alex@alexcrichton.com>"]
+build = false
 exclude = ["tests/archives/*"]
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = """
 A Rust implementation of a TAR file reader and writer. This library does not
 currently handle compression, but it is abstract over all I/O readers and
@@ -32,14 +38,42 @@ keywords = [
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/alexcrichton/tar-rs"
 
+[features]
+default = ["xattr"]
+
+[lib]
+name = "tar"
+path = "src/lib.rs"
+
+[[example]]
+name = "extract_file"
+path = "examples/extract_file.rs"
+
+[[example]]
+name = "list"
+path = "examples/list.rs"
+
+[[example]]
+name = "raw_list"
+path = "examples/raw_list.rs"
+
+[[example]]
+name = "write"
+path = "examples/write.rs"
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
+
+[[test]]
+name = "entry"
+path = "tests/entry.rs"
+
 [dependencies.filetime]
 version = "0.2.8"
 
 [dev-dependencies.tempfile]
 version = "3"
-
-[features]
-default = ["xattr"]
 
 [target."cfg(unix)".dependencies.libc]
 version = "0.2"

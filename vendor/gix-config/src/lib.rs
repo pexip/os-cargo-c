@@ -40,16 +40,15 @@
 pub mod file;
 
 ///
-#[allow(clippy::empty_docs)]
 pub mod lookup;
 pub mod parse;
 ///
-#[allow(clippy::empty_docs)]
 pub mod value;
 pub use gix_config_value::{color, integer, path, Boolean, Color, Integer, Path};
 
+mod key;
+pub use key::{AsKey, KeyRef};
 mod types;
 pub use types::{File, Source};
 ///
-#[allow(clippy::empty_docs)]
 pub mod source;
