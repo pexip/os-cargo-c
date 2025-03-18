@@ -1,6 +1,6 @@
 [package]
 name = "cargo-c"
-version = "0.10.2+cargo-0.80.0"
+version = "0.10.11+cargo-0.86.0"
 authors = ["Luca Barbato <lu_zero@gentoo.org>"]
 description = "Helper program to build and install c-like libraries"
 license = "MIT"
@@ -9,7 +9,7 @@ readme = "README.md"
 repository = "https://github.com/lu-zero/cargo-c"
 categories = ["command-line-utilities", "development-tools::cargo-plugins"]
 keywords = ["cargo", "cdylib"]
-rust-version = "1.76"
+rust-version = "1.83"
 
 [[bin]]
 name = "cargo-capi"
@@ -28,13 +28,13 @@ name = "cargo-ctest"
 path = "src/bin/ctest.rs"
 
 [dependencies]
-cargo = "0.80.0"
+cargo = "0.86.0"
 cargo-util = "0.2"
 semver = "1.0.3"
 log = "0.4"
-clap = { version = "4.0.29", features = ["color", "derive", "cargo", "string"] }
+clap = { version = "4.5.18", features = ["color", "derive", "cargo", "string", "wrap_help"] }
 regex = "1.5.6"
-cbindgen = { version="0.26.0", default-features=false }
+cbindgen = { version="0.28.0", default-features=false }
 toml = "0.8"
 serde = "1.0.123"
 serde_derive = "1.0"
@@ -42,21 +42,9 @@ serde_json = "1.0.62"
 anyhow = "1.0"
 cc = "1.0"
 glob = "0.3"
-itertools = "0.13"
-
-# workaround cargo
-[target.'cfg(windows)'.dependencies.windows-sys]
-version = "0.52"
-features = [
-  "Win32_Foundation",
-  "Win32_Storage_FileSystem",
-  "Win32_System_IO",
-  "Win32_System_Console",
-  "Win32_System_Threading",
-  "Win32_System_JobObjects",
-  "Win32_Security",
-  "Win32_System_SystemServices"
-]
+itertools = "0.14"
+implib = "0.3.5"
+object = { version = "0.36.4", default-features = false, features = ["std", "read_core", "pe"] }
 
 [features]
 default = []
@@ -65,3 +53,7 @@ vendored-openssl = ["cargo/vendored-openssl"]
 [profile.release-strip]
 inherits = "release"
 strip = "symbols"
+
+# To avoid #414
+[workspace]
+exclude = ["example-project", "example-workspace"]

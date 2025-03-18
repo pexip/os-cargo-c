@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,7 +14,10 @@ use cargo::util::interning::InternedString;
 use cargo::{CliResult, GlobalContext};
 
 use anyhow::Context as _;
-use cargo_util::paths::{copy, create, create_dir_all, open, read, read_bytes, write};
+use cargo_util::paths::{copy, create_dir_all, open, read, read_bytes, write};
+use implib::def::ModuleDef;
+use implib::{Flavor, ImportLibrary, MachineType};
+use itertools::Itertools;
 use semver::Version;
 
 use crate::build_targets::BuildTargets;
@@ -66,8 +70,6 @@ fn copy_prebuilt_include_file(
 ) -> anyhow::Result<()> {
     let mut shell = ws.gctx().shell();
     shell.status("Populating", "uninstalled header directory")?;
-    let path = &format!("PKG_CONFIG_PATH=\"{}\"", root_output.display());
-    shell.verbose(move |s| s.note(path))?;
     for (from, to) in build_targets.extra.include.iter() {
         let to = root_output.join("include").join(to);
         create_dir_all(to.parent().unwrap())?;
@@ -102,7 +104,7 @@ fn build_pc_files(
 
 fn patch_target(
     pkg: &mut Package,
-    libkinds: &[&str],
+    library_types: LibraryTypes,
     capi_config: &CApiConfig,
 ) -> anyhow::Result<()> {
     use cargo::core::compiler::CrateType;
@@ -110,20 +112,19 @@ fn patch_target(
     let manifest = pkg.manifest_mut();
     let targets = manifest.targets_mut();
 
-    let kinds: Vec<_> = libkinds
-        .iter()
-        .map(|&kind| match kind {
-            "staticlib" => CrateType::Staticlib,
-            "cdylib" => CrateType::Cdylib,
-            _ => unreachable!(),
-        })
-        .collect();
+    let mut kinds = Vec::with_capacity(2);
 
-    for target in targets.iter_mut() {
-        if target.is_lib() {
-            target.set_kind(TargetKind::Lib(kinds.clone()));
-            target.set_name(&capi_config.library.name);
-        }
+    if library_types.staticlib {
+        kinds.push(CrateType::Staticlib);
+    }
+
+    if library_types.cdylib {
+        kinds.push(CrateType::Cdylib);
+    }
+
+    for target in targets.iter_mut().filter(|t| t.is_lib()) {
+        target.set_kind(TargetKind::Lib(kinds.to_vec()));
+        target.set_name(&capi_config.library.name);
     }
 
     Ok(())
@@ -136,144 +137,96 @@ fn build_def_file(
     target: &target::Target,
     targetdir: &Path,
 ) -> anyhow::Result<()> {
-    let os = &target.os;
-    let env = &target.env;
+    if target.os == "windows" && target.env == "msvc" {
+        ws.gctx().shell().status("Building", ".def file")?;
 
-    if os == "windows" && env == "msvc" {
-        ws.gctx()
-            .shell()
-            .status("Building", ".def file using dumpbin")?;
+        // Parse the .dll as an object file
+        let dll_path = targetdir.join(format!("{}.dll", name.replace('-', "_")));
+        let dll_content = std::fs::read(&dll_path)?;
+        let dll_file = object::File::parse(&*dll_content)?;
 
-        let txt_path = targetdir.join(format!("{name}.txt"));
+        // Create the .def output file
+        let def_file = cargo_util::paths::create(targetdir.join(format!("{name}.def")))?;
 
-        let target_str = format!("{}-pc-windows-msvc", &target.arch);
-        let mut dumpbin = match cc::windows_registry::find(&target_str, "dumpbin.exe") {
-            Some(command) => command,
-            None => std::process::Command::new("dumpbin"),
-        };
-
-        dumpbin
-            .arg("/EXPORTS")
-            .arg(targetdir.join(format!("{}.dll", name.replace('-', "_"))));
-        dumpbin.arg(format!("/OUT:{}", txt_path.to_str().unwrap()));
-
-        let out = dumpbin.output()?;
-        if out.status.success() {
-            let txt_file = open(txt_path)?;
-            let buf_reader = BufReader::new(txt_file);
-            let mut def_file = create(targetdir.join(format!("{name}.def")))?;
-            writeln!(def_file, "EXPORTS")?;
-
-            // The Rust loop below is analogue to the following loop.
-            // for /f "skip=19 tokens=4" %A in (file.txt) do echo %A > file.def
-            // The most recent versions of dumpbin adds three lines of copyright
-            // information before the relevant content.
-            // If the "/OUT:file.txt" dumpbin's option is used, the three
-            // copyright lines are added to the shell, so the txt file
-            // contains three lines less.
-            // The Rust loop first skips 16 lines and then, for each line,
-            // deletes all the characters up to the fourth space included
-            // (skip=16 tokens=4)
-            for line in buf_reader
-                .lines()
-                .skip(16)
-                .take_while(|l| !l.as_ref().unwrap().is_empty())
-                .map(|l| {
-                    l.unwrap()
-                        .as_str()
-                        .split_whitespace()
-                        .nth(3)
-                        .unwrap()
-                        .to_string()
-                })
-            {
-                writeln!(def_file, "\t{line}")?;
-            }
-
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("Command failed {:?}", dumpbin))
-        }
-    } else {
-        Ok(())
+        write_def_file(dll_file, def_file)?;
     }
+
+    Ok(())
 }
 
-/// Build import library for windows-gnu
+fn write_def_file<W: std::io::Write>(dll_file: object::File, mut def_file: W) -> anyhow::Result<W> {
+    use object::read::Object;
+
+    writeln!(def_file, "EXPORTS")?;
+
+    for export in dll_file.exports()? {
+        def_file.write_all(export.name())?;
+        def_file.write_all(b"\n")?;
+    }
+
+    Ok(def_file)
+}
+
+/// Build import library for windows
 fn build_implib_file(
     ws: &Workspace,
+    build_targets: &BuildTargets,
     name: &str,
     target: &target::Target,
     targetdir: &Path,
-    dlltool: &Path,
 ) -> anyhow::Result<()> {
-    let os = &target.os;
-    let env = &target.env;
+    if target.os == "windows" {
+        ws.gctx().shell().status("Building", "implib")?;
 
-    if os == "windows" {
-        let arch = &target.arch;
-        if env == "gnu" {
-            ws.gctx()
-                .shell()
-                .status("Building", "implib using dlltool")?;
+        let def_path = targetdir.join(format!("{name}.def"));
+        let def_contents = cargo_util::paths::read(&def_path)?;
 
-            let binutils_arch = match arch.as_str() {
-                "x86_64" => "i386:x86-64",
-                "x86" => "i386",
-                "aarch64" => "arm64",
-                _ => unimplemented!("Windows support for {} is not implemented yet.", arch),
-            };
+        let flavor = match target.env.as_str() {
+            "msvc" => Flavor::Msvc,
+            _ => Flavor::Gnu,
+        };
 
-            let mut dlltool_command =
-                std::process::Command::new(dlltool.to_str().unwrap_or("dlltool"));
-            dlltool_command.arg("-m").arg(binutils_arch);
-            dlltool_command.arg("-D").arg(format!("{name}.dll"));
-            dlltool_command
-                .arg("-l")
-                .arg(targetdir.join(format!("{name}.dll.a")));
-            dlltool_command
-                .arg("-d")
-                .arg(targetdir.join(format!("{name}.def")));
-
-            let out = dlltool_command.output()?;
-            if out.status.success() {
-                Ok(())
-            } else {
-                Err(anyhow::anyhow!("Command failed {:?}", dlltool_command))
+        let machine_type = match target.arch.as_str() {
+            "x86_64" => MachineType::AMD64,
+            "x86" => MachineType::I386,
+            "aarch64" => MachineType::ARM64,
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Windows support for {} is not implemented yet.",
+                    target.arch
+                ))
             }
-        } else {
-            ws.gctx().shell().status("Building", "implib using lib")?;
-            let target_str = format!("{}-pc-windows-msvc", &target.arch);
-            let mut lib = match cc::windows_registry::find(&target_str, "lib.exe") {
-                Some(command) => command,
-                None => std::process::Command::new("lib"),
-            };
-            let lib_arch = match arch.as_str() {
-                "x86_64" => "X64",
-                "x86" => "IX86",
-                _ => unimplemented!("Windows support for {} is not implemented yet.", arch),
-            };
-            lib.arg(format!(
-                "/DEF:{}",
-                targetdir.join(format!("{name}.def")).display()
-            ));
-            lib.arg(format!("/MACHINE:{lib_arch}"));
-            lib.arg(format!("/NAME:{name}.dll"));
-            lib.arg(format!(
-                "/OUT:{}",
-                targetdir.join(format!("{name}.dll.lib")).display()
-            ));
+        };
 
-            let out = lib.output()?;
-            if out.status.success() {
-                Ok(())
-            } else {
-                Err(anyhow::anyhow!("Command failed {:?}", lib))
-            }
-        }
-    } else {
-        Ok(())
+        let lib_name = build_targets
+            .shared_output_file_name()
+            .unwrap()
+            .into_string()
+            .unwrap();
+        let implib_path = build_targets.impl_lib.as_ref().unwrap();
+
+        let implib_file = cargo_util::paths::create(implib_path)?;
+        write_implib(implib_file, lib_name, machine_type, flavor, &def_contents)?;
     }
+
+    Ok(())
+}
+
+fn write_implib<W: std::io::Write + std::io::Seek>(
+    mut w: W,
+    lib_name: String,
+    machine_type: MachineType,
+    flavor: Flavor,
+    def_contents: &str,
+) -> anyhow::Result<W> {
+    let mut module_def = ModuleDef::parse(def_contents, machine_type)?;
+    module_def.import_name = lib_name;
+
+    let import_library = ImportLibrary::from_def(module_def, machine_type, flavor);
+
+    import_library.write_to(&mut w)?;
+
+    Ok(w)
 }
 
 #[derive(Debug)]
@@ -283,6 +236,7 @@ struct FingerPrint {
     build_targets: BuildTargets,
     install_paths: InstallPaths,
     static_libs: String,
+    hasher: DefaultHasher,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -297,21 +251,24 @@ impl FingerPrint {
         root_output: &Path,
         build_targets: &BuildTargets,
         install_paths: &InstallPaths,
+        capi_config: &CApiConfig,
     ) -> Self {
+        let mut hasher = DefaultHasher::new();
+
+        capi_config.hash(&mut hasher);
+
         Self {
             id: id.to_owned(),
             root_output: root_output.to_owned(),
             build_targets: build_targets.clone(),
             install_paths: install_paths.clone(),
             static_libs: String::new(),
+            hasher,
         }
     }
 
     fn hash(&self) -> anyhow::Result<Option<String>> {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = self.hasher.clone();
         self.install_paths.hash(&mut hasher);
 
         let mut paths: Vec<&PathBuf> = Vec::new();
@@ -372,7 +329,7 @@ impl FingerPrint {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 pub struct CApiConfig {
     pub header: HeaderCApiConfig,
     pub pkg_config: PkgConfigCApiConfig,
@@ -380,7 +337,7 @@ pub struct CApiConfig {
     pub install: InstallCApiConfig,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 pub struct HeaderCApiConfig {
     pub name: String,
     pub subdirectory: String,
@@ -388,7 +345,7 @@ pub struct HeaderCApiConfig {
     pub enabled: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 pub struct PkgConfigCApiConfig {
     pub name: String,
     pub filename: String,
@@ -399,14 +356,14 @@ pub struct PkgConfigCApiConfig {
     pub strip_include_path_components: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 pub enum VersionSuffix {
     Major,
     MajorMinor,
     MajorMinorPatch,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 pub struct LibraryCApiConfig {
     pub name: String,
     pub version: Version,
@@ -436,19 +393,19 @@ impl LibraryCApiConfig {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Hash)]
 pub struct InstallCApiConfig {
     pub include: Vec<InstallTarget>,
     pub data: Vec<InstallTarget>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash)]
 pub enum InstallTarget {
     Asset(InstallTargetPaths),
     Generated(InstallTargetPaths),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct InstallTargetPaths {
     /// pattern to feed to glob::glob()
     ///
@@ -934,7 +891,7 @@ fn compile_with_exec(
         let mut leaf_args: Vec<String> = rustc_target
             .shared_object_link_args(&capi_config, &install_paths.libdir, root_output)
             .into_iter()
-            .flat_map(|l| vec!["-C".to_string(), format!("link-arg={l}")])
+            .flat_map(|l| ["-C".to_string(), format!("link-arg={l}")])
             .collect();
 
         leaf_args.extend(pkg_rustflags.clone());
@@ -1005,7 +962,7 @@ impl CPackage {
     fn from_package(
         pkg: &mut Package,
         args: &ArgMatches,
-        libkinds: &[&str],
+        library_types: LibraryTypes,
         rustc_target: &target::Target,
         root_output: &Path,
     ) -> anyhow::Result<CPackage> {
@@ -1014,7 +971,7 @@ impl CPackage {
         let root_path = pkg.root().to_path_buf();
         let capi_config = load_manifest_capi_config(pkg, rustc_target)?;
 
-        patch_target(pkg, libkinds, &capi_config)?;
+        patch_target(pkg, library_types, &capi_config)?;
 
         let name = &capi_config.library.name;
 
@@ -1023,12 +980,18 @@ impl CPackage {
             name,
             rustc_target,
             root_output,
-            libkinds,
+            library_types,
             &capi_config,
             args.get_flag("meson"),
         )?;
 
-        let finger_print = FingerPrint::new(&id, root_output, &build_targets, &install_paths);
+        let finger_print = FingerPrint::new(
+            &id,
+            root_output,
+            &build_targets,
+            &install_paths,
+            &capi_config,
+        );
 
         Ok(CPackage {
             version,
@@ -1041,36 +1004,114 @@ impl CPackage {
     }
 }
 
+fn deprecation_warnings(ws: &Workspace, args: &ArgMatches) -> anyhow::Result<()> {
+    if args.contains_id("dlltool") {
+        ws.gctx()
+        .shell()
+        .warn("The `dlltool` support is now builtin. The cli option is deprecated and will be removed in the future")?;
+    }
+
+    Ok(())
+}
+
+/// What library types to build
+#[derive(Debug, Clone, Copy)]
+pub struct LibraryTypes {
+    pub staticlib: bool,
+    pub cdylib: bool,
+}
+
+impl LibraryTypes {
+    fn from_target(target: &target::Target) -> Self {
+        // for os == "none", cdylib does not make sense. By default cdylib is also not built on
+        // musl, but that can be overriden by the user. That is useful when musl is being used as
+        // main libc, e.g. in Alpine, Gentoo and OpenWRT
+        //
+        // See also
+        //
+        // - https://github.com/lu-zero/cargo-c?tab=readme-ov-file#shared-libraries-are-not-built-on-musl-systems
+        // - https://github.com/lu-zero/cargo-c/issues/180
+        Self {
+            staticlib: true,
+            cdylib: target.os != "none" && target.env != "musl",
+        }
+    }
+
+    fn from_args(target: &target::Target, args: &ArgMatches) -> Self {
+        match args.get_many::<String>("library-type") {
+            Some(library_types) => Self::from_library_types(target, library_types),
+            None => Self::from_target(target),
+        }
+    }
+
+    pub(crate) fn from_library_types<S: AsRef<str>>(
+        target: &target::Target,
+        library_types: impl Iterator<Item = S>,
+    ) -> Self {
+        let (mut staticlib, mut cdylib) = (false, false);
+
+        for library_type in library_types {
+            staticlib |= library_type.as_ref() == "staticlib";
+            cdylib |= library_type.as_ref() == "cdylib";
+        }
+
+        // when os is none, a cdylib cannot be produced
+        // forcing a cdylib for musl is allowed here (see [`LibraryTypes::from_target`])
+        cdylib &= target.os != "none";
+
+        Self { staticlib, cdylib }
+    }
+
+    const fn only_staticlib(self) -> bool {
+        self.staticlib && !self.cdylib
+    }
+
+    const fn only_cdylib(self) -> bool {
+        self.cdylib && !self.staticlib
+    }
+}
+
+fn static_libraries(link_line: &str, rustc_target: &target::Target) -> String {
+    link_line
+        .trim()
+        .split(' ')
+        .filter(|s| {
+            if rustc_target.env == "msvc" && s.starts_with("/defaultlib") {
+                return false;
+            }
+            !s.is_empty()
+        })
+        .unique()
+        .map(|lib| {
+            if rustc_target.env == "msvc" && lib.ends_with(".lib") {
+                return format!("-l{}", lib.trim_end_matches(".lib"));
+            }
+            lib.trim().to_string()
+        })
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn cbuild(
     ws: &mut Workspace,
     config: &GlobalContext,
     args: &ArgMatches,
     default_profile: &str,
 ) -> anyhow::Result<(Vec<CPackage>, CompileOptions)> {
-    let rustc = config.load_global_rustc(Some(ws))?;
-    let targets = args.targets()?;
-    let (target, is_target_overridden) = match targets.len() {
-        0 => (rustc.host.to_string(), false),
-        1 => (targets[0].to_string(), true),
-        _ => {
-            anyhow::bail!("Multiple targets not supported yet");
-        }
+    deprecation_warnings(ws, args)?;
+
+    let (target, is_target_overridden) = match args.targets()?.as_slice() {
+        [] => (config.load_global_rustc(Some(ws))?.host.to_string(), false),
+        [target] => (target.to_string(), true),
+        [..] => anyhow::bail!("Multiple targets not supported yet"),
     };
 
     let rustc_target = target::Target::new(Some(&target), is_target_overridden)?;
 
-    let default_kind = || match (rustc_target.os.as_str(), rustc_target.env.as_str()) {
-        ("none", _) | (_, "musl") => vec!["staticlib"],
-        _ => vec!["staticlib", "cdylib"],
-    };
+    let library_types = LibraryTypes::from_args(&rustc_target, args);
 
-    let libkinds = args
-        .get_many::<String>("library-type")
-        .map_or_else(default_kind, |v| v.map(String::as_str).collect::<Vec<_>>());
-    let only_staticlib = !libkinds.contains(&"cdylib");
-    let only_cdylib = !libkinds.contains(&"staticlib");
-
-    let profile = args.get_profile_name(config, default_profile, ProfileChecking::Custom)?;
+    let profile = args.get_profile_name(default_profile, ProfileChecking::Custom)?;
 
     let profiles = Profiles::new(ws, profile)?;
 
@@ -1084,10 +1125,7 @@ pub fn cbuild(
         .join(PathBuf::from(target))
         .join(profiles.get_dir_name());
 
-    let capi_feature = InternedString::new("capi");
-
     let mut members = Vec::new();
-
     let mut pristine = false;
 
     let requested: Vec<_> = compile_opts
@@ -1097,22 +1135,23 @@ pub fn cbuild(
         .map(|p| p.package_id())
         .collect();
 
-    for m in ws.members_mut().filter(|m| {
-        m.library().is_some()
-            && m.summary().features().contains_key(&capi_feature)
-            && requested.contains(&m.package_id())
-    }) {
-        let cpkg = CPackage::from_package(m, args, &libkinds, &rustc_target, &root_output)?;
+    let capi_feature = InternedString::new("capi");
+    let is_relevant_package = |package: &Package| {
+        package.library().is_some()
+            && package.summary().features().contains_key(&capi_feature)
+            && requested.contains(&package.package_id())
+    };
 
-        pristine = pristine || cpkg.finger_print.load_previous().is_err();
+    for m in ws.members_mut().filter(|p| is_relevant_package(p)) {
+        let cpkg = CPackage::from_package(m, args, library_types, &rustc_target, &root_output)?;
+
+        pristine |= cpkg.finger_print.load_previous().is_err() || !cpkg.finger_print.is_valid();
 
         members.push(cpkg);
     }
 
-    if pristine {
-        // If the cache is somehow missing force a full rebuild;
-        compile_opts.build_config.force_rebuild = true;
-    }
+    // If the cache is somehow missing force a full rebuild;
+    compile_opts.build_config.force_rebuild |= pristine;
 
     let exec = Arc::new(Exec::default());
     let out_dirs = compile_with_exec(
@@ -1149,48 +1188,30 @@ pub fn cbuild(
 
     for cpkg in members.iter_mut() {
         // it is a new build, build the additional files and update update the cache
-        // if the hash value does not match.
-        if new_build && !cpkg.finger_print.is_valid() {
+        if new_build {
             let name = &cpkg.capi_config.library.name;
-            let static_libs = if only_cdylib {
-                "".to_string()
+            let (pkg_config_static_libs, static_libs) = if library_types.only_cdylib() {
+                (String::new(), String::new())
+            } else if let Some(libs) = exec.link_line.lock().unwrap().get(&cpkg.finger_print.id) {
+                (static_libraries(libs, &rustc_target), libs.to_string())
             } else {
-                exec.link_line
-                    .lock()
-                    .unwrap()
-                    .values()
-                    .next()
-                    .unwrap()
-                    .to_string()
+                (String::new(), String::new())
             };
             let capi_config = &cpkg.capi_config;
             let build_targets = &cpkg.build_targets;
 
             let mut pc = PkgConfig::from_workspace(name, &cpkg.install_paths, args, capi_config);
-            if only_staticlib {
-                pc.add_lib(&static_libs);
+            if library_types.only_staticlib() {
+                pc.add_lib(&pkg_config_static_libs);
             }
-            pc.add_lib_private(&static_libs);
+            pc.add_lib_private(&pkg_config_static_libs);
 
             build_pc_files(ws, &capi_config.pkg_config.filename, &root_output, &pc)?;
 
-            if !only_staticlib && capi_config.library.import_library {
+            if !library_types.only_staticlib() && capi_config.library.import_library {
                 let lib_name = name;
                 build_def_file(ws, lib_name, &rustc_target, &root_output)?;
-
-                let mut dlltool = std::env::var_os("DLLTOOL")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from("dlltool"));
-
-                // dlltool argument overwrites environment var
-                if args.contains_id("dlltool") {
-                    dlltool = args
-                        .get_one::<PathBuf>("dlltool")
-                        .map(PathBuf::from)
-                        .unwrap();
-                }
-
-                build_implib_file(ws, lib_name, &rustc_target, &root_output, &dlltool)?;
+                build_implib_file(ws, build_targets, lib_name, &rustc_target, &root_output)?;
             }
 
             if capi_config.header.enabled {
@@ -1213,7 +1234,7 @@ pub fn cbuild(
                     &name.replace('-', "_"),
                     &rustc_target,
                     &root_output,
-                    &libkinds,
+                    library_types,
                     capi_config,
                     args.get_flag("meson"),
                 )?;
@@ -1238,12 +1259,19 @@ pub fn cbuild(
                 }
             }
 
+            // This can be supplied to Rust, so it must be in
+            // linker-native syntax
             cpkg.finger_print.static_libs = static_libs;
             cpkg.finger_print.store()?;
         } else {
             // It is not a new build, recover the static_libs value from the cache
             cpkg.finger_print.static_libs = cpkg.finger_print.load_previous()?.static_libs;
         }
+
+        ws.gctx().shell().verbose(|s| {
+            let path = &format!("PKG_CONFIG_PATH=\"{}\"", root_output.display());
+            s.note(path)
+        })?;
     }
 
     Ok((members, compile_opts))
@@ -1251,13 +1279,12 @@ pub fn cbuild(
 
 pub fn ctest(
     ws: &Workspace,
-    config: &GlobalContext,
     args: &ArgMatches,
     packages: &[CPackage],
     mut compile_opts: CompileOptions,
 ) -> CliResult {
     compile_opts.build_config.requested_profile =
-        args.get_profile_name(config, "test", ProfileChecking::Custom)?;
+        args.get_profile_name("test", ProfileChecking::Custom)?;
     compile_opts.build_config.mode = CompileMode::Test;
 
     compile_opts.filter = ops::CompileFilter::new(
@@ -1365,5 +1392,38 @@ mod tests {
         library.version_suffix_components = Some(VersionSuffix::MajorMinorPatch);
         let sover = library.sover();
         assert_eq!(sover, "1.0.0");
+    }
+
+    #[test]
+    pub fn test_lib_listing() {
+        let libs_osx = "-lSystem -lc -lm";
+        let libs_linux = "-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc";
+        let libs_hurd = "-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc";
+        let libs_msvc = "kernel32.lib advapi32.lib kernel32.lib ntdll.lib userenv.lib ws2_32.lib kernel32.lib ws2_32.lib kernel32.lib msvcrt.lib /defaultlib:msvcrt";
+        let libs_mingw = "-lkernel32 -ladvapi32 -lkernel32 -lntdll -luserenv -lws2_32 -lkernel32 -lws2_32 -lkernel32";
+
+        let target_osx = target::Target::new(Some("x86_64-apple-darwin"), false).unwrap();
+        let target_linux = target::Target::new(Some("x86_64-unknown-linux-gnu"), false).unwrap();
+        let target_hurd = target::Target::new(Some("x86_64-unknown-hurd-gnu"), false).unwrap();
+        let target_msvc = target::Target::new(Some("x86_64-pc-windows-msvc"), false).unwrap();
+        let target_mingw = target::Target::new(Some("x86_64-pc-windows-gnu"), false).unwrap();
+
+        assert_eq!(static_libraries(libs_osx, &target_osx), "-lSystem -lc -lm");
+        assert_eq!(
+            static_libraries(libs_linux, &target_linux),
+            "-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc"
+        );
+        assert_eq!(
+            static_libraries(libs_hurd, &target_hurd),
+            "-lgcc_s -lutil -lrt -lpthread -lm -ldl -lc"
+        );
+        assert_eq!(
+            static_libraries(libs_msvc, &target_msvc),
+            "-lkernel32 -ladvapi32 -lntdll -luserenv -lws2_32 -lmsvcrt"
+        );
+        assert_eq!(
+            static_libraries(libs_mingw, &target_mingw),
+            "-lkernel32 -ladvapi32 -lntdll -luserenv -lws2_32"
+        );
     }
 }

@@ -5,27 +5,55 @@ use crate::install::InstallPaths;
 use std::path::{Component, Path, PathBuf};
 
 fn canonicalize<P: AsRef<Path>>(path: P) -> String {
-    let mut separator = "";
-    let out = path
-        .as_ref()
-        .components()
-        .map(|p| match p {
+    let mut stack = Vec::with_capacity(16);
+
+    struct Item<'a> {
+        separator: bool,
+        component: Component<'a>,
+    }
+
+    let mut separator = false;
+
+    for component in path.as_ref().components() {
+        match component {
             Component::RootDir => {
-                separator = "/";
-                String::new()
+                separator = true;
             }
-            Component::Prefix(_) => p.as_os_str().to_string_lossy().to_string(),
-            _ => {
-                let c = format!("{}{}", separator, p.as_os_str().to_string_lossy());
-                separator = "/";
-                c
+            Component::Prefix(_) => stack.push(Item {
+                separator: false,
+                component,
+            }),
+            Component::ParentDir => {
+                let _ = stack.pop();
             }
-        })
-        .collect::<String>();
-    if out.is_empty() {
-        "/".to_string()
+            Component::CurDir => stack.push(Item {
+                separator: false,
+                component,
+            }),
+            Component::Normal(_) => {
+                stack.push(Item {
+                    separator,
+                    component,
+                });
+                separator = true;
+            }
+        }
+    }
+
+    if stack.is_empty() {
+        String::from("/")
     } else {
-        out
+        let mut buf = String::with_capacity(64);
+
+        for item in stack {
+            if item.separator {
+                buf.push('/');
+            }
+
+            buf.push_str(&item.component.as_os_str().to_string_lossy());
+        }
+
+        buf
     }
 }
 
@@ -133,18 +161,14 @@ impl PkgConfig {
         // TODO: support exec_prefix
         if args.contains_id("includedir") {
             if let Ok(suffix) = install_paths.includedir.strip_prefix(&pc.prefix) {
-                let mut includedir = PathBuf::from("${prefix}");
-                includedir.push(suffix);
-                pc.includedir = includedir;
+                pc.includedir = PathBuf::from("${prefix}").join(suffix);
             } else {
                 pc.includedir.clone_from(&install_paths.includedir);
             }
         }
         if args.contains_id("libdir") {
             if let Ok(suffix) = install_paths.libdir.strip_prefix(&pc.prefix) {
-                let mut libdir = PathBuf::from("${prefix}");
-                libdir.push(suffix);
-                pc.libdir = libdir;
+                pc.libdir = PathBuf::from("${prefix}").join(suffix);
             } else {
                 pc.libdir.clone_from(&install_paths.libdir);
             }
@@ -208,63 +232,38 @@ impl PkgConfig {
     }
 
     pub fn render(&self) -> String {
-        let mut base = format!(
-            "prefix={}
-exec_prefix={}
-libdir={}
-includedir={}
+        // writing to a String only fails on OOM, which we disregard
+        self.render_help(String::with_capacity(1024)).unwrap()
+    }
 
-Name: {}
-Description: {}
-Version: {}
-Libs: {}
-Cflags: {}",
-            canonicalize(&self.prefix),
-            canonicalize(&self.exec_prefix),
-            canonicalize(&self.libdir),
-            canonicalize(&self.includedir),
-            self.name,
-            // avoid endlines
-            self.description.replace('\n', " "),
-            self.version,
-            self.libs.join(" "),
-            self.cflags.join(" "),
-        );
+    fn render_help<W: core::fmt::Write>(&self, mut w: W) -> Result<W, core::fmt::Error> {
+        writeln!(w, "prefix={}", canonicalize(&self.prefix))?;
+        writeln!(w, "exec_prefix={}", canonicalize(&self.exec_prefix))?;
+        writeln!(w, "libdir={}", canonicalize(&self.libdir))?;
+        writeln!(w, "includedir={}", canonicalize(&self.includedir))?;
+
+        writeln!(w)?;
+
+        writeln!(w, "Name: {}", self.name)?;
+        writeln!(w, "Description: {}", self.description.replace('\n', " "))?; // avoid endlines
+        writeln!(w, "Version: {}", self.version)?;
+        writeln!(w, "Libs: {}", self.libs.join(" "))?;
+        writeln!(w, "Cflags: {}", self.cflags.join(" "))?;
 
         if !self.libs_private.is_empty() {
-            base.push_str(
-                "
-Libs.private: ",
-            );
-            base.push_str(&self.libs_private.join(" "));
+            writeln!(w, "Libs.private: {}", self.libs_private.join(" "))?;
         }
 
         if !self.requires.is_empty() {
-            base.push_str(
-                "
-Requires: ",
-            );
-            base.push_str(&self.requires.join(", "));
+            writeln!(w, "Requires: {}", self.requires.join(", "))?;
         }
 
         if !self.requires_private.is_empty() {
-            base.push_str(
-                "
-Requires.private: ",
-            );
-            base.push_str(&self.requires_private.join(", "));
+            let joined = self.requires_private.join(", ");
+            writeln!(w, "Requires.private: {}", joined)?;
         }
 
-        /*
-        Conflicts:
-        Libs.private:
-
-                ).to_owned()
-        */
-
-        base.push('\n');
-
-        base
+        Ok(w)
     }
 }
 
@@ -307,6 +306,157 @@ mod test {
         );
         pkg.add_lib("-lbar").add_cflag("-DFOO");
 
-        println!("{:?}\n{}", pkg, pkg.render());
+        let expected = concat!(
+            "prefix=/usr/local\n",
+            "exec_prefix=${prefix}\n",
+            "libdir=${exec_prefix}/lib\n",
+            "includedir=${prefix}/include\n",
+            "\n",
+            "Name: foo\n",
+            "Description: \n",
+            "Version: 0.1\n",
+            "Libs: -L${libdir} -lfoo -lbar\n",
+            "Cflags: -I${includedir} -DFOO\n",
+            "Requires: somelib, someotherlib\n",
+            "Requires.private: someprivatelib >= 1.0\n",
+        );
+
+        assert_eq!(expected, pkg.render());
+    }
+
+    mod test_canonicalize {
+        use super::canonicalize;
+
+        #[test]
+        fn test_absolute_path() {
+            let path = "/home/user/docs";
+            let result = canonicalize(path);
+            assert_eq!(result, "/home/user/docs");
+        }
+
+        #[test]
+        fn test_relative_path() {
+            let path = "home/user/docs";
+            let result = canonicalize(path);
+            assert_eq!(result, "home/user/docs");
+        }
+
+        #[test]
+        fn test_current_directory() {
+            let path = "/home/user/./docs";
+            let result = canonicalize(path);
+            assert_eq!(result, "/home/user/docs");
+        }
+
+        #[test]
+        fn test_parent_directory() {
+            let path = "/home/user/../docs";
+            let result = canonicalize(path);
+            assert_eq!(result, "/home/docs");
+        }
+
+        #[test]
+        fn test_mixed_dots_and_parent_dirs() {
+            let path = "/home/./user/../docs/./files";
+            let result = canonicalize(path);
+            assert_eq!(result, "/home/docs/files");
+        }
+
+        #[test]
+        fn test_multiple_consecutive_slashes() {
+            let path = "/home//user///docs";
+            let result = canonicalize(path);
+            assert_eq!(result, "/home/user/docs");
+        }
+
+        #[test]
+        fn test_empty_path() {
+            let path = "";
+            let result = canonicalize(path);
+            assert_eq!(result, "/");
+        }
+
+        #[test]
+        fn test_single_dot() {
+            let path = ".";
+            let result = canonicalize(path);
+            assert_eq!(result, ".");
+        }
+
+        #[test]
+        fn test_single_dot_in_absolute_path() {
+            let path = "/.";
+            let result = canonicalize(path);
+            assert_eq!(result, "/");
+        }
+
+        #[test]
+        fn test_trailing_slash() {
+            let path = "/home/user/docs/";
+            let result = canonicalize(path);
+            assert_eq!(result, "/home/user/docs");
+        }
+
+        #[test]
+        fn test_dots_complex_case() {
+            let path = "/a/b/./c/../d//e/./../f";
+            let result = canonicalize(path);
+            assert_eq!(result, "/a/b/d/f");
+        }
+
+        #[cfg(windows)]
+        mod windows {
+            use std::path::Path;
+
+            use super::*;
+
+            #[test]
+            fn test_canonicalize_basic_windows_path() {
+                let input = Path::new(r"C:\Users\test\..\Documents");
+                let expected = r"C:/Users/Documents";
+                let result = canonicalize(input);
+                assert_eq!(result, expected);
+            }
+
+            #[test]
+            fn test_canonicalize_with_current_dir() {
+                let input = Path::new(r"C:\Users\.\Documents");
+                let expected = r"C:/Users/Documents";
+                let result = canonicalize(input);
+                assert_eq!(result, expected);
+            }
+
+            #[test]
+            fn test_canonicalize_with_double_parent_dir() {
+                let input = Path::new(r"C:\Users\test\..\..\Documents");
+                let expected = r"C:/Documents";
+                let result = canonicalize(input);
+                assert_eq!(result, expected);
+            }
+
+            #[test]
+            fn test_canonicalize_with_trailing_slash() {
+                let input = Path::new(r"C:\Users\test\..\Documents\");
+                let expected = r"C:/Users/Documents";
+                let result = canonicalize(input);
+                assert_eq!(result, expected);
+            }
+
+            #[test]
+            fn test_canonicalize_relative_path() {
+                let input = Path::new(r"Users\test\..\Documents");
+                let expected = r"Users/Documents";
+                let result = canonicalize(input);
+                assert_eq!(result, expected);
+            }
+
+            #[test]
+            fn test_canonicalize_current_dir_only() {
+                let input = Path::new(r".\");
+                let expected = r".";
+                let result = canonicalize(input);
+                assert_eq!(result, expected);
+            }
+        }
     }
 }
