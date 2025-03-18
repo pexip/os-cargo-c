@@ -1,3 +1,9 @@
+cargo-c (0.10.11+pexip24u1) pexip; urgency=medium
+
+  * New upstream release
+
+ -- Samuel Collins <samuel.collins@pexip.com>  Tue, 18 Mar 2025 09:58:19+0000
+
 cargo-c (0.10.2+pexip24u1) pexip; urgency=medium
 
   * New upstream release
