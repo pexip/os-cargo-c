@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use cargo::util::command_prelude::CommandExt;
 use cargo::util::command_prelude::{flag, multi_opt, opt};
-use cargo::util::{CliError, CliResult};
+use cargo::util::{style, CliError, CliResult};
 
 use cargo_util::{ProcessBuilder, ProcessError};
 
@@ -47,7 +47,7 @@ struct Common {
     #[clap(long = "datadir")]
     datadir: Option<PathBuf>,
     #[clap(long = "dlltool")]
-    /// Use the provided dlltool when building for the windows-gnu targets.
+    /// Use the provided dlltool when building for the windows-gnu targets. (deprecated and no-op)
     dlltool: Option<PathBuf>,
     #[clap(long = "crt-static")]
     /// Build the library embedding the C runtime
@@ -55,6 +55,23 @@ struct Common {
     /// Use the Linux/Meson library naming convention on Windows
     #[clap(long = "meson-paths", default_value = "false")]
     meson: bool,
+}
+
+pub fn main_cli() -> Command {
+    let styles = {
+        clap::builder::styling::Styles::styled()
+            .header(style::HEADER)
+            .usage(style::USAGE)
+            .literal(style::LITERAL)
+            .placeholder(style::PLACEHOLDER)
+            .error(style::ERROR)
+            .valid(style::VALID)
+            .invalid(style::INVALID)
+    };
+    clap::command!()
+        .dont_collapse_args_in_usage(true)
+        .allow_external_subcommands(true)
+        .styles(styles)
 }
 
 fn base_cli() -> Command {
@@ -104,6 +121,16 @@ fn base_cli() -> Command {
             "Build all benches",
             "Build all targets",
         )
+        .arg(
+            multi_opt(
+                "library-type",
+                "LIBRARY-TYPE",
+                "Build only a type of library",
+            )
+            .global(true)
+            .ignore_case(true)
+            .value_parser(["cdylib", "staticlib"]),
+        )
         .arg_profile("Build artifacts with the specified profile")
         .arg_features()
         .arg_target_triple("Build for the target triple")
@@ -134,16 +161,6 @@ pub fn subcommand_build(name: &'static str, about: &'static str) -> Command {
     base_cli()
         .name(name)
         .about(about)
-        .arg(
-            multi_opt(
-                "library-type",
-                "LIBRARY-TYPE",
-                "Build only a type of library",
-            )
-            .global(true)
-            .ignore_case(true)
-            .value_parser(["cdylib", "staticlib"]),
-        )
         .arg_release("Build artifacts in release mode, with optimizations")
         .arg_package_spec_no_all(
             "Package to build (see `cargo help pkgid`)",
@@ -163,16 +180,6 @@ pub fn subcommand_install(name: &'static str, about: &'static str) -> Command {
     base_cli()
         .name(name)
         .about(about)
-        .arg(
-            multi_opt(
-                "library-type",
-                "LIBRARY-TYPE",
-                "Build only a type of library",
-            )
-            .global(true)
-            .ignore_case(true)
-            .value_parser(["cdylib", "staticlib"]),
-        )
         .arg(flag("debug", "Build in debug mode instead of release mode"))
         .arg_release(
             "Build artifacts in release mode, with optimizations. This is the default behavior.",
@@ -193,9 +200,13 @@ the --debug flag will use the `dev` profile instead.
 
 pub fn subcommand_test(name: &'static str) -> Command {
     base_cli()
-        .trailing_var_arg(true)
         .name(name)
         .about("Test the crate C-API")
+        .arg(
+            Arg::new("TESTNAME")
+                .action(ArgAction::Set)
+                .help("If specified, only run tests containing this string in their names"),
+        )
         .arg(
             Arg::new("args")
                 .help("Arguments for the test binary")

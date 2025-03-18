@@ -13,6 +13,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+          # x86_64:
+          - os: macos-13
+          # arm64:
           - os: macos-latest
           - os: windows-latest
             toolchain-suffix: -gnu
@@ -30,55 +33,56 @@ jobs:
         with:
           toolchain: stable${{ matrix.toolchain-suffix }}
 
+      - name: Install pkgconf
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: ucrt64
+          install: mingw-w64-ucrt-x86_64-pkgconf
+
+      - name: Put pkgconf on PATH
+        if: runner.os == 'Windows'
+        run: Add-Content $env:GITHUB_PATH "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
+
       - name: Install cargo-c applet
-        run: |
-          cargo install --path .
+        run: cargo install --path .
 
       - name: Test example project
         working-directory: example-project
-        run: |
-          cargo test --verbose
+        run: cargo test --verbose
 
       - name: Build C API for example project
         working-directory: example-project
-        run: |
-          cargo cbuild --verbose --release
+        run: cargo cbuild --verbose --release
 
       - name: Run C API tests for example project
         working-directory: example-project
-        run: |
-          cargo ctest --verbose --release
+        run: cargo ctest --verbose --release
 
-      - name: Install into temporary location
+      - name: Install into /usr/local
+        if: runner.os != 'Windows'
         working-directory: example-project
-        run: |
-          cargo cinstall --verbose --release --destdir=temp
+        run: sudo -E env PATH=$PATH cargo cinstall --verbose --release --prefix=/usr/local
 
-      - name: Copy installed files to /usr/local
-        if: startsWith(matrix.os, 'macos') || startsWith(matrix.os, 'ubuntu')
+      - name: Install into MSYS2 root
+        if: runner.os == 'Windows'
         working-directory: example-project
-        run: |
-          sudo cp -r temp/usr/local/* /usr/local/
-
-      - name: Test pkg-config
-        if: startsWith(matrix.os, 'macos')
-        run: |
-          set -x
-          test "$(pkg-config --cflags example_project)" = "-I/usr/local/include/example-project-0.1"
-          test "$(pkg-config --libs example_project)" = "-L/usr/local/lib -lexample-project"
-
-      - name: Install pkgconf
-        if: startsWith(matrix.os, 'ubuntu')
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: pkgconf
+        run: cargo cinstall --verbose --release --prefix="${{ steps.msys2.outputs.msys2-location }}\ucrt64"
 
       - name: Test pkgconf
-        if: startsWith(matrix.os, 'ubuntu')
+        if: runner.os == 'macOS'
         run: |
           set -x
           pkgconf --version
-          pkg-config --version
+          test "$(pkgconf --cflags example_project)" = "-I/usr/local/include/example-project-0.1"
+          test "$(pkgconf --libs example_project)" = "-L/usr/local/lib -lexample-project"
+
+      - name: Test pkgconf
+        if: runner.os == 'Linux'
+        run: |
+          set -x
+          pkgconf --version
           ARCHDIR=`dpkg-architecture -qDEB_HOST_MULTIARCH`
           # ubuntu seems to add trailing spaces for no specific reasons.
           CFLAGS=$(pkgconf --cflags example_project)
@@ -87,14 +91,44 @@ jobs:
           test "${CFLAGS%% }" = "-I/usr/local/include/example-project-0.1"
           test "${LIBS%% }" = "-L/usr/local/lib/${ARCHDIR} -lexample-project"
 
-      - name: Update dynamic linker cache
-        if: startsWith(matrix.os, 'ubuntu')
+      - name: Test pkgconf
+        if: runner.os == 'Windows'
+        shell: bash
         run: |
-          sudo ldconfig
+          set -x
+          pkgconf --version
+          # use --define-variable=prefix=C:/foo to test relative libdir/includedir generation
+          # https://github.com/lu-zero/cargo-c/commit/76a66cd72eb4271501557eebea7060821e63b702
+          test "$(pkgconf --define-variable=prefix=C:/foo --cflags example_project)" = "-IC:/foo/include/example-project-0.1"
+          test "$(pkgconf --define-variable=prefix=C:/foo --libs example_project)" = "-LC:/foo/lib -lexample-project"
+
+      - name: Update dynamic linker cache
+        if: runner.os == 'Linux'
+        run: sudo ldconfig
 
       - name: Test usage from C (using Makefile)
-        if: startsWith(matrix.os, 'macos') || startsWith(matrix.os, 'ubuntu')
+        if: runner.os != 'Windows'
         working-directory: example-project/usage-from-c
-        run: |
-          make
+        run: make
 
+      - name: Setup Meson + Ninja
+        if: runner.os == 'Windows' && matrix.toolchain-suffix == '-msvc'
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m pip install meson ninja
+
+      - name: Setup MSVC for test
+        if: runner.os == 'Windows' && matrix.toolchain-suffix == '-msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86_64
+
+      - name: Test usage from C (Meson)
+        if: runner.os == 'Windows' && matrix.toolchain-suffix == '-msvc'
+        working-directory: example-project/usage-from-c
+        env:
+          PKG_CONFIG: pkgconf
+        run: |
+          meson setup build
+          meson compile -C build
+          meson test -C build
